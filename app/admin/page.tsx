@@ -1,5 +1,5 @@
 import { count } from "drizzle-orm";
-import { db } from "@/lib/db";
+import { getDb } from "@/lib/db";
 import { users } from "@/lib/schema";
 
 export const dynamic = "force-dynamic";
@@ -43,7 +43,7 @@ export default async function AdminPage({
 
   let total: number | null = null;
   try {
-    const [row] = await db.select({ value: count() }).from(users);
+    const [row] = await getDb().select({ value: count() }).from(users);
     total = row.value;
   } catch {
     total = null;

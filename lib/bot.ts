@@ -1,25 +1,34 @@
 import { Bot } from "grammy";
-import { db } from "./db";
+import { getDb } from "./db";
 import { users } from "./schema";
 
-export const bot = new Bot(process.env.BOT_TOKEN!);
+let _bot: Bot | null = null;
 
-bot.command("start", async (ctx) => {
-  try {
-    await db
-      .insert(users)
-      .values({
-        telegramId: ctx.from!.id,
-        username: ctx.from!.username ?? null,
-        firstName: ctx.from!.first_name ?? null,
-      })
-      .onConflictDoNothing();
-  } catch (e) {
-    console.error("DB error:", e);
-  }
-  await ctx.reply("سلام! ربات فعال است ✅");
-});
+export function getBot() {
+  if (_bot) return _bot;
 
-bot.on("message:text", (ctx) => ctx.reply(`گفتی: ${ctx.message.text}`));
+  const bot = new Bot(process.env.BOT_TOKEN!);
 
-bot.catch((err) => console.error("Bot error:", err));
+  bot.command("start", async (ctx) => {
+    try {
+      await getDb()
+        .insert(users)
+        .values({
+          telegramId: ctx.from!.id,
+          username: ctx.from!.username ?? null,
+          firstName: ctx.from!.first_name ?? null,
+        })
+        .onConflictDoNothing();
+    } catch (e) {
+      console.error("DB error:", e);
+    }
+    await ctx.reply("سلام! ربات فعال است ✅");
+  });
+
+  bot.on("message:text", (ctx) => ctx.reply(`گفتی: ${ctx.message.text}`));
+
+  bot.catch((err) => console.error("Bot error:", err));
+
+  _bot = bot;
+  return bot;
+}
