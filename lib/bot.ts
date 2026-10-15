@@ -7,22 +7,32 @@ let _bot: Bot | null = null;
 export function getBot() {
   if (_bot) return _bot;
 
-  const bot = new Bot(process.env.BOT_TOKEN!);
+  const token = process.env.BOT_TOKEN;
+  if (!token) {
+    throw new Error("BOT_TOKEN must be set");
+  }
+
+  const bot = new Bot(token);
 
   bot.command("start", async (ctx) => {
+    // اول جواب بده تا حتی با مشکل دیتابیس، ربات ساکت نماند
+    await ctx.reply("سلام! ربات فعال است ✅");
+
+    // بعد کاربر را در دیتابیس ذخیره کن
     try {
-      await getDb()
-        .insert(users)
-        .values({
-          telegramId: ctx.from!.id,
-          username: ctx.from!.username ?? null,
-          firstName: ctx.from!.first_name ?? null,
-        })
-        .onConflictDoNothing();
+      if (ctx.from) {
+        await getDb()
+          .insert(users)
+          .values({
+            telegramId: ctx.from.id,
+            username: ctx.from.username ?? null,
+            firstName: ctx.from.first_name ?? null,
+          })
+          .onConflictDoNothing();
+      }
     } catch (e) {
       console.error("DB error:", e);
     }
-    await ctx.reply("سلام! ربات فعال است ✅");
   });
 
   bot.on("message:text", (ctx) => ctx.reply(`گفتی: ${ctx.message.text}`));

@@ -13,6 +13,8 @@ function createDb() {
   const client = postgres(databaseUrl, {
     max: 1,
     prepare: false,
+    connect_timeout: 5, // اگر اتصال گیر کرد، بعد از ۵ ثانیه خطا بده
+    idle_timeout: 20,
   });
   return drizzle(client, { schema });
 }
