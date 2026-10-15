@@ -1,11 +1,20 @@
-import { neon } from "@neondatabase/serverless";
-import { drizzle } from "drizzle-orm/neon-http";
+import postgres from "postgres";
+import { drizzle } from "drizzle-orm/postgres-js";
 import * as schema from "./schema";
 
 let _db: ReturnType<typeof createDb> | null = null;
 
 function createDb() {
-  return drizzle(neon(process.env.DATABASE_URL!), { schema });
+  const databaseUrl = process.env.DATABASE_URL;
+  if (!databaseUrl) {
+    throw new Error("DATABASE_URL must be set to connect to Supabase Postgres");
+  }
+
+  const client = postgres(databaseUrl, {
+    max: 1,
+    prepare: false,
+  });
+  return drizzle(client, { schema });
 }
 
 export function getDb() {
