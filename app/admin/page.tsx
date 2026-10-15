@@ -4,6 +4,7 @@ import { users } from "@/lib/schema";
 
 export const dynamic = "force-dynamic";
 
+
 export default async function AdminPage({
   searchParams,
 }: {
