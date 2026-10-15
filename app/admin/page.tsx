@@ -12,7 +12,7 @@ export default async function AdminPage({
   const params = (await searchParams) ?? {};
   const adminPassword = process.env.ADMIN_PASSWORD;
   const suppliedPassword = params.password ?? "";
-  const isAuthenticated = !adminPassword || suppliedPassword === adminPassword;
+  const isAuthenticated = Boolean(adminPassword) && suppliedPassword === adminPassword;
   const hasWrongPassword = Boolean(adminPassword) && suppliedPassword.length > 0 && !isAuthenticated;
 
   if (!isAuthenticated) {
