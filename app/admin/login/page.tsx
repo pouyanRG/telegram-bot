@@ -47,6 +47,9 @@ export default async function LoginPage({
         params.error && <p style={{ color: "crimson" }}>رمز عبور اشتباه است.</p>
       )}
 
+
+
+
       <form action={login} style={{ display: "grid", gap: 12 }}>
         <input
           name="password"
