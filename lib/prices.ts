@@ -19,10 +19,10 @@ const COINS = [
   { id: "hyperliquid", symbol: "HYPE" },
   { id: "monero", symbol: "XMR" },
   { id: "chainlink", symbol: "LINK" },
-  { id: "the-open-network", symbol: "TON" }, // اگر منظورت از Gram چیز دیگری بود، id و symbol را عوض کن
+  { id: "the-open-network", symbol: "TON" },
 ];
 
-const CACHE_KEY = "market"; // کلید جدید، چون ساختار داده عوض شده
+const CACHE_KEY = "market";
 const TTL_MS = 2 * 60 * 1000;
 
 export type Snapshot = {
@@ -32,15 +32,22 @@ export type Snapshot = {
   usdtToman?: number;
 };
 
+// ---------- دریافت داده ----------
+
 async function getJson(url: string, headers: Record<string, string> = {}) {
   const res = await fetch(url, { headers, signal: AbortSignal.timeout(8000) });
   if (!res.ok) throw new Error(`${url} -> ${res.status}`);
   return res.json();
 }
 
+function cgHeaders() {
+  const h: Record<string, string> = {};
+  if (process.env.COINGECKO_API_KEY) h["x-cg-demo-api-key"] = process.env.COINGECKO_API_KEY;
+  return h;
+}
+
 async function fetchSnapshot(): Promise<Snapshot> {
-  const headers: Record<string, string> = {};
-  if (process.env.COINGECKO_API_KEY) headers["x-cg-demo-api-key"] = process.env.COINGECKO_API_KEY;
+  const headers = cgHeaders();
   const ids = COINS.map((c) => c.id).join(",");
 
   const [coins, glob, fng, nobitex] = await Promise.allSettled([
@@ -53,7 +60,7 @@ async function fetchSnapshot(): Promise<Snapshot> {
     getJson("https://api.nobitex.ir/market/stats?srcCurrency=usdt&dstCurrency=rls"),
   ]);
 
-  if (coins.status === "rejected") throw coins.reason; // بدون قیمت کوین‌ها پیام بی‌معنی است
+  if (coins.status === "rejected") throw coins.reason;
 
   const snap: Snapshot = { coins: coins.value };
 
@@ -101,7 +108,13 @@ export async function getPrices() {
   }
 }
 
-// ---------- قالب‌بندی ----------
+// ---------- ابزارهای قالب‌بندی ----------
+
+// طبق مستندات تلگرام: < > & باید escape شوند
+const esc = (s: string) =>
+  s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
+const RLM = "\u200F"; // برای راست‌چین ماندن خط‌های فارسی
 
 const fmtPrice = (n: number) =>
   n >= 10000
@@ -116,6 +129,14 @@ function fmtUsd(n: number) {
   return `${(n / 1e6).toFixed(1)} میلیون دلار`;
 }
 
+const pctText = (ch?: number) =>
+  ch === undefined ? "" : `${ch >= 0 ? "+" : ""}${ch.toFixed(2)}%`;
+
+function gauge(v: number) {
+  const filled = Math.max(0, Math.min(10, Math.round(v / 10)));
+  return "█".repeat(filled) + "░".repeat(10 - filled);
+}
+
 const FNG_FA: Record<string, { text: string; icon: string }> = {
   "Extreme Fear": { text: "ترس شدید", icon: "🟥" },
   Fear: { text: "ترس", icon: "🟧" },
@@ -123,35 +144,27 @@ const FNG_FA: Record<string, { text: string; icon: string }> = {
   Greed: { text: "طمع", icon: "🟩" },
   "Extreme Greed": { text: "طمع شدید", icon: "🟩" },
 };
-const RLM = "\u200F"; // برای راست‌چین ماندن خط‌های فارسی
 
-function gauge(v: number) {
-  const filled = Math.max(0, Math.min(10, Math.round(v / 10)));
-  return "█".repeat(filled) + "░".repeat(10 - filled);
-}
-
-const pctText = (ch?: number) =>
-  ch === undefined ? "" : `${ch >= 0 ? "+" : ""}${ch.toFixed(2)}%`;
+// ---------- پیام بازار (parse_mode: HTML) ----------
 
 export function formatPrices(s: Snapshot, updatedAt?: Date) {
   const rows = COINS.map((c) => ({ symbol: c.symbol, p: s.coins[c.id] })).filter(
     (r) => r.p
   );
 
-  // جدول تراز‌شده
+  // جدول تراز‌شده (داخل <pre>)
   const table = rows
     .map(({ symbol, p }) => {
       const ch = p.usd_24h_change;
       const dot = ch === undefined ? "⚪️" : ch >= 0 ? "🟢" : "🔴";
-      return `${dot} ${symbol.padEnd(5)} ${("$" + fmtPrice(p.usd)).padStart(11)} ${pctText(ch).padStart(8)}`;
+      return `${dot} ${esc(symbol).padEnd(5)} ${("$" + fmtPrice(p.usd)).padStart(11)} ${pctText(ch).padStart(8)}`;
     })
     .join("\n");
 
   // برترین رشد و افت
-  const withCh = rows.filter((r) => r.p.usd_24h_change !== undefined);
-  const sorted = [...withCh].sort(
-    (a, b) => b.p.usd_24h_change! - a.p.usd_24h_change!
-  );
+  const sorted = rows
+    .filter((r) => r.p.usd_24h_change !== undefined)
+    .sort((a, b) => b.p.usd_24h_change! - a.p.usd_24h_change!);
   const best = sorted[0];
   const worst = sorted[sorted.length - 1];
 
@@ -168,30 +181,34 @@ export function formatPrices(s: Snapshot, updatedAt?: Date) {
     `<pre>${table}</pre>`,
   ];
 
+  // اسپویلر: کاربر لمس می‌کند تا ببیند
   if (best && worst && best.symbol !== worst.symbol) {
     out.push(
       "",
-      `${RLM}🚀 بیشترین رشد: <b>${best.symbol}</b> (${pctText(best.p.usd_24h_change)})`,
-      `${RLM}🩸 بیشترین افت: <b>${worst.symbol}</b> (${pctText(worst.p.usd_24h_change)})`
+      `${RLM}🎯 <b>برترین‌های امروز</b> (برای دیدن لمس کن):`,
+      `<tg-spoiler>${RLM}🚀 ${esc(best.symbol)} ${pctText(best.p.usd_24h_change)}   🩸 ${esc(worst.symbol)} ${pctText(worst.p.usd_24h_change)}</tg-spoiler>`
     );
   }
 
+  // نمای کلی بازار: بلاک‌کوت جمع‌شونده (داخل آن هیچ بلاک‌کوت یا pre دیگری نیست)
   if (s.global) {
     const g = s.global;
     out.push(
       "",
-      `${RLM}🌐 <b>نمای کلی بازار</b>`,
-      `${RLM}💰 مارکت‌کپ: ${fmtUsd(g.marketCap)}`,
-      `${RLM}🪙 آلت‌کوین‌ها: ${fmtUsd(g.marketCap * (1 - g.btcDom / 100))}`,
-      `${RLM}🔄 حجم معاملات: ${fmtUsd(g.volume)}`,
-      `${RLM}🟠 دامیننس بیت‌کوین: ${g.btcDom.toFixed(2)}%`,
-      `${RLM}⚪️ دامیننس اتریوم: ${g.ethDom.toFixed(2)}%`,
-      `${RLM}🟡 ارزهای فعال: ${g.active.toLocaleString("en-US")}+`
+      [
+        `<blockquote expandable>${RLM}🌐 <b>نمای کلی بازار</b>`,
+        `${RLM}💰 مارکت‌کپ: ${fmtUsd(g.marketCap)}`,
+        `${RLM}🪙 آلت‌کوین‌ها: ${fmtUsd(g.marketCap * (1 - g.btcDom / 100))}`,
+        `${RLM}🔄 حجم معاملات: ${fmtUsd(g.volume)}`,
+        `${RLM}🟠 دامیننس بیت‌کوین: ${g.btcDom.toFixed(2)}%`,
+        `${RLM}⚪️ دامیننس اتریوم: ${g.ethDom.toFixed(2)}%`,
+        `${RLM}🟡 ارزهای فعال: ${g.active.toLocaleString("en-US")}+</blockquote>`,
+      ].join("\n")
     );
   }
 
   if (s.fng) {
-    const f = FNG_FA[s.fng.label] ?? { text: s.fng.label, icon: "⬜️" };
+    const f = FNG_FA[s.fng.label] ?? { text: esc(s.fng.label), icon: "⬜️" };
     out.push(
       "",
       `${RLM}${f.icon} <b>شاخص ترس و طمع:</b> ${s.fng.value} (${f.text})`,
@@ -207,5 +224,103 @@ export function formatPrices(s: Snapshot, updatedAt?: Date) {
     "",
     "<blockquote>برای دریافت قیمت و مشخصات و نمودار ارزهای دیجیتال، نام یا نماد آن را ارسال کنید</blockquote>"
   );
+  return out.join("\n");
+}
+
+// ---------- جستجوی تک‌ارز ----------
+
+export type CoinInfo = {
+  id: string;
+  name: string;
+  symbol: string;
+  usd: number;
+  change24h?: number;
+  high24h?: number;
+  low24h?: number;
+  marketCap?: number;
+  volume24h?: number;
+  rank?: number;
+};
+
+const coinMemo = new Map<string, { at: number; value: CoinInfo | null }>();
+const COIN_TTL_MS = 60 * 1000;
+
+async function marketsById(id: string): Promise<CoinInfo | null> {
+  const arr = await getJson(
+    `https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&ids=${encodeURIComponent(id)}`,
+    cgHeaders()
+  );
+  const d = arr?.[0];
+  if (!d) return null;
+  return {
+    id: d.id,
+    name: d.name,
+    symbol: String(d.symbol).toUpperCase(),
+    usd: d.current_price,
+    change24h: d.price_change_percentage_24h ?? undefined,
+    high24h: d.high_24h ?? undefined,
+    low24h: d.low_24h ?? undefined,
+    marketCap: d.market_cap ?? undefined,
+    volume24h: d.total_volume ?? undefined,
+    rank: d.market_cap_rank ?? undefined,
+  };
+}
+
+export async function findCoin(
+  query: string,
+  opts: { byId?: boolean } = {}
+): Promise<CoinInfo | null> {
+  const q = query.trim().toLowerCase();
+  if (!q) return null;
+
+  const key = `${opts.byId ? "id" : "q"}:${q}`;
+  const hit = coinMemo.get(key);
+  if (hit && Date.now() - hit.at < COIN_TTL_MS) return hit.value;
+
+  let value: CoinInfo | null = null;
+
+  if (opts.byId) {
+    value = await marketsById(q);
+  } else {
+    const known = COINS.find((c) => c.symbol.toLowerCase() === q || c.id === q);
+    let id = known?.id;
+    if (!id) {
+      const r = await getJson(
+        `https://api.coingecko.com/api/v3/search?query=${encodeURIComponent(q)}`,
+        cgHeaders()
+      );
+      id = r?.coins?.[0]?.id;
+    }
+    if (id) value = await marketsById(id);
+  }
+
+  coinMemo.set(key, { at: Date.now(), value });
+  return value;
+}
+
+export function formatCoin(c: CoinInfo) {
+  const ch = c.change24h;
+  const dot = ch === undefined ? "⚪️" : ch >= 0 ? "🟢" : "🔴";
+
+  const out: string[] = [
+    `${RLM}🪙 <b>${esc(c.name)}</b> (${esc(c.symbol)})${c.rank ? `  •  رتبه #${c.rank}` : ""}`,
+    "",
+    "<pre>" +
+      [
+        `Price : $${fmtPrice(c.usd)}`,
+        ch === undefined ? "" : `24h   : ${pctText(ch)} ${dot}`,
+        c.high24h !== undefined ? `High  : $${fmtPrice(c.high24h)}` : "",
+        c.low24h !== undefined ? `Low   : $${fmtPrice(c.low24h)}` : "",
+      ]
+        .filter(Boolean)
+        .join("\n") +
+      "</pre>",
+  ];
+
+  const extra: string[] = [];
+  if (c.marketCap) extra.push(`${RLM}💰 مارکت‌کپ: ${fmtUsd(c.marketCap)}`);
+  if (c.volume24h) extra.push(`${RLM}🔄 حجم ۲۴ ساعت: ${fmtUsd(c.volume24h)}`);
+  if (extra.length) out.push("", `<blockquote>${extra.join("\n")}</blockquote>`);
+
   return out.join("\n");
 }
