@@ -32,23 +32,9 @@ export async function GET(req: Request) {
   });
   const infoRes = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/getWebhookInfo`);
 
-  const cmdRes = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/setMyCommands`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      commands: [
-        { command: "start", description: "شروع و منوی اصلی" },
-        { command: "menu", description: "نمایش منو" },
-        { command: "prices", description: "قیمت ارز و طلا" },
-        { command: "help", description: "راهنما" },
-      ],
-    }),
-  });
-
   return Response.json({
     webhookUrl: url,
     set: await setRes.json(),
     info: await infoRes.json(),
-    commands: await cmdRes.json(),
   });
 }

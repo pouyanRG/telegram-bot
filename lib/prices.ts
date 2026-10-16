@@ -123,37 +123,89 @@ const FNG_FA: Record<string, { text: string; icon: string }> = {
   Greed: { text: "طمع", icon: "🟩" },
   "Extreme Greed": { text: "طمع شدید", icon: "🟩" },
 };
+const RLM = "\u200F"; // برای راست‌چین ماندن خط‌های فارسی
 
-export function formatPrices(s: Snapshot, _updatedAt?: Date) {
-  const lines = COINS.map((c) => {
-    const p = s.coins[c.id];
-    if (!p) return `▫️ ${c.symbol}: —`;
-    const ch = p.usd_24h_change;
-    const arrow = ch === undefined || ch >= 0 ? "🔺" : "🔻";
-    const pct = ch === undefined ? "" : ` (${ch >= 0 ? "+" : ""}${ch.toFixed(2)}%)`;
-    return `${arrow} ${c.symbol}: ${fmtPrice(p.usd)}${pct}`;
+function gauge(v: number) {
+  const filled = Math.max(0, Math.min(10, Math.round(v / 10)));
+  return "█".repeat(filled) + "░".repeat(10 - filled);
+}
+
+const pctText = (ch?: number) =>
+  ch === undefined ? "" : `${ch >= 0 ? "+" : ""}${ch.toFixed(2)}%`;
+
+export function formatPrices(s: Snapshot, updatedAt?: Date) {
+  const rows = COINS.map((c) => ({ symbol: c.symbol, p: s.coins[c.id] })).filter(
+    (r) => r.p
+  );
+
+  // جدول تراز‌شده
+  const table = rows
+    .map(({ symbol, p }) => {
+      const ch = p.usd_24h_change;
+      const dot = ch === undefined ? "⚪️" : ch >= 0 ? "🟢" : "🔴";
+      return `${dot} ${symbol.padEnd(5)} ${("$" + fmtPrice(p.usd)).padStart(11)} ${pctText(ch).padStart(8)}`;
+    })
+    .join("\n");
+
+  // برترین رشد و افت
+  const withCh = rows.filter((r) => r.p.usd_24h_change !== undefined);
+  const sorted = [...withCh].sort(
+    (a, b) => b.p.usd_24h_change! - a.p.usd_24h_change!
+  );
+  const best = sorted[0];
+  const worst = sorted[sorted.length - 1];
+
+  const time = (updatedAt ?? new Date()).toLocaleTimeString("fa-IR", {
+    timeZone: "Asia/Tehran",
+    hour: "2-digit",
+    minute: "2-digit",
   });
 
-  const out: string[] = ["📊 <b>آخرین وضعیت بازار</b>", "", ...lines, ""];
+  const out: string[] = [
+    `${RLM}📊 <b>وضعیت بازار ارزهای دیجیتال</b>`,
+    `${RLM}🕒 بروزرسانی: ${time}`,
+    "",
+    `<pre>${table}</pre>`,
+  ];
+
+  if (best && worst && best.symbol !== worst.symbol) {
+    out.push(
+      "",
+      `${RLM}🚀 بیشترین رشد: <b>${best.symbol}</b> (${pctText(best.p.usd_24h_change)})`,
+      `${RLM}🩸 بیشترین افت: <b>${worst.symbol}</b> (${pctText(worst.p.usd_24h_change)})`
+    );
+  }
 
   if (s.global) {
     const g = s.global;
-    out.push(`💰 مارکت‌کپ: ${fmtUsd(g.marketCap)}`);
-    out.push(`🪙 آلت‌کوین‌ها: ${fmtUsd(g.marketCap * (1 - g.btcDom / 100))}`);
-    out.push(`🔄 معاملات: ${fmtUsd(g.volume)}`);
-    out.push(`🟠 دامیننس بیت‌کوین: ${g.btcDom.toFixed(2)}%`);
-    out.push(`⚪️ دامیننس اتریوم: ${g.ethDom.toFixed(2)}%`);
+    out.push(
+      "",
+      `${RLM}🌐 <b>نمای کلی بازار</b>`,
+      `${RLM}💰 مارکت‌کپ: ${fmtUsd(g.marketCap)}`,
+      `${RLM}🪙 آلت‌کوین‌ها: ${fmtUsd(g.marketCap * (1 - g.btcDom / 100))}`,
+      `${RLM}🔄 حجم معاملات: ${fmtUsd(g.volume)}`,
+      `${RLM}🟠 دامیننس بیت‌کوین: ${g.btcDom.toFixed(2)}%`,
+      `${RLM}⚪️ دامیننس اتریوم: ${g.ethDom.toFixed(2)}%`,
+      `${RLM}🟡 ارزهای فعال: ${g.active.toLocaleString("en-US")}+`
+    );
   }
+
   if (s.fng) {
     const f = FNG_FA[s.fng.label] ?? { text: s.fng.label, icon: "⬜️" };
-    out.push(`${f.icon} احساسات: ${s.fng.value} (${f.text})`);
+    out.push(
+      "",
+      `${RLM}${f.icon} <b>شاخص ترس و طمع:</b> ${s.fng.value} (${f.text})`,
+      `<code>${gauge(s.fng.value)}</code>`
+    );
   }
-  if (s.global) out.push(`🟡 تعداد ارزهای فعال: ${s.global.active.toLocaleString("en-US")}+`);
 
   if (s.usdtToman) {
-    out.push("", `💵 <b>قیمت تتر: ${s.usdtToman.toLocaleString("fa-IR")} تومان</b>`);
+    out.push("", `${RLM}💵 <b>قیمت تتر: ${s.usdtToman.toLocaleString("fa-IR")} تومان</b>`);
   }
 
-  out.push("", "<blockquote>برای دریافت قیمت و مشخصات و نمودار ارزهای دیجیتال، نام یا نماد آن را ارسال کنید</blockquote>");
+  out.push(
+    "",
+    "<blockquote>برای دریافت قیمت و مشخصات و نمودار ارزهای دیجیتال، نام یا نماد آن را ارسال کنید</blockquote>"
+  );
   return out.join("\n");
 }
