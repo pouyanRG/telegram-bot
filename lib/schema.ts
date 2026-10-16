@@ -79,3 +79,4 @@ export const voiceJobs = pgTable(
     byUser: index("voice_jobs_user_idx").on(t.userId, t.createdAt),
   })
 );
+
