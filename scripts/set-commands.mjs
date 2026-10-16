@@ -13,6 +13,7 @@ const res = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/setMyCommands`
       { command: "start", description: "شروع و منوی اصلی" },
       { command: "menu", description: "نمایش منو" },
       { command: "help", description: "راهنما" },
+      { command: "prices", description: "قیمت ارز و طلا" },
     ],
   }),
 });

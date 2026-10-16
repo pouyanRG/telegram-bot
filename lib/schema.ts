@@ -2,6 +2,7 @@ import {
   bigint,
   boolean,
   integer,
+  jsonb,
   pgTable,
   primaryKey,
   serial,
@@ -40,3 +41,9 @@ export const quotas = pgTable(
     pk: primaryKey({ columns: [t.userId, t.feature, t.day] }),
   })
 );
+
+export const cache = pgTable("cache", {
+  key: text("key").primaryKey(),
+  data: jsonb("data").notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
