@@ -11,9 +11,7 @@ const res = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/setMyCommands`
   body: JSON.stringify({
     commands: [
       { command: "start", description: "شروع و منوی اصلی" },
-      { command: "menu", description: "نمایش منو" },
       { command: "help", description: "راهنما" },
-      { command: "prices", description: "قیمت ارز و طلا" },
     ],
   }),
 });
