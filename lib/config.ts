@@ -1,7 +1,6 @@
 // ---------- قابلیت‌ها و سهمیه‌ی روزانه ----------
 
 export const FEATURES = {
-  anon: { label: "چت ناشناس", emoji: "🕶", limit: 10 },
   assistant: { label: "دستیار شخصی", emoji: "🧠", limit: 10 },
   persona: { label: "شخصیت‌ها", emoji: "🎭", limit: 10 },
   voice: { label: "ویس به متن", emoji: "🎙", limit: 5 },
@@ -13,7 +12,7 @@ export type Feature = keyof typeof FEATURES;
 
 export const FEATURE_KEYS = Object.keys(FEATURES) as Feature[];
 
-// سقف پیش‌فرض را می‌شود با متغیر محیطی عوض کرد: LIMIT_VOICE=20 ، LIMIT_ANON=50 ، ...
+// سقف پیش‌فرض را می‌شود با متغیر محیطی عوض کرد: LIMIT_VOICE=20 .
 function resolveLimit(feature: Feature): number {
   const raw = process.env[`LIMIT_${feature.toUpperCase()}`];
   const n = raw === undefined ? NaN : Number(raw);

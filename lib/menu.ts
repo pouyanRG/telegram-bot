@@ -2,7 +2,6 @@ import { InlineKeyboard } from "grammy";
 
 export function mainMenu() {
   return new InlineKeyboard()
-    .text("🕶 چت ناشناس", "menu:anon")
     .text("🧠 دستیار شخصی", "menu:assistant")
     .row()
     .text("🎭 شخصیت‌ها", "menu:persona")
