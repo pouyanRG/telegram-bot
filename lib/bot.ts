@@ -1,8 +1,11 @@
 import { Bot } from "grammy";
-import { getDb } from "./db";
-import { users } from "./schema";
+import { userGuard } from "./middleware";
+import { mainMenu } from "./menu";
 
 let _bot: Bot | null = null;
+const WELCOME = "سلام! 👋\nیکی از بخش‌های زیر را انتخاب کن:";
+const HELP =
+  "از /menu برای دیدن بخش‌ها استفاده کن.\nاین ربات در حال توسعه است و بخش‌ها به‌تدریج فعال می‌شوند.";
 
 export function getBot() {
   if (_bot) return _bot;
@@ -14,28 +17,26 @@ export function getBot() {
 
   const bot = new Bot(token);
 
-  bot.command("start", async (ctx) => {
-    // اول جواب بده تا حتی با مشکل دیتابیس، ربات ساکت نماند
-    await ctx.reply("سلام! ربات فعال است ✅");
+  bot.use(userGuard);
 
-    // بعد کاربر را در دیتابیس ذخیره کن
-    try {
-      if (ctx.from) {
-        await getDb()
-          .insert(users)
-          .values({
-            telegramId: ctx.from.id,
-            username: ctx.from.username ?? null,
-            firstName: ctx.from.first_name ?? null,
-          })
-          .onConflictDoNothing();
-      }
-    } catch (e) {
-      console.error("DB error:", e);
-    }
+  bot.command(["start", "menu"], (ctx) =>
+    ctx.reply(WELCOME, { reply_markup: mainMenu() })
+  );
+
+  bot.command("help", (ctx) => ctx.reply(HELP));
+
+  bot.callbackQuery("menu:help", async (ctx) => {
+    await ctx.answerCallbackQuery();
+    await ctx.reply(HELP);
   });
 
-  bot.on("message:text", (ctx) => ctx.reply(`گفتی: ${ctx.message.text}`));
+  bot.callbackQuery(/^menu:/, (ctx) =>
+    ctx.answerCallbackQuery({ text: "این بخش به‌زودی فعال می‌شود 🚧" })
+  );
+
+  bot.on("message:text", (ctx) =>
+    ctx.reply("برای دیدن بخش‌ها /menu را بزن.", { reply_markup: mainMenu() })
+  );
 
   bot.catch((err) => console.error("Bot error:", err));
 

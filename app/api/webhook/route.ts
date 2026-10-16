@@ -1,5 +1,6 @@
 import { webhookCallback } from "grammy";
 import { getBot } from "@/lib/bot";
+import { isAdmin } from "@/lib/adminAuth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -12,10 +13,10 @@ export async function POST(req: Request) {
 }
 
 export async function GET(req: Request) {
-  const { BOT_TOKEN, WEBHOOK_SECRET, ADMIN_PASSWORD } = process.env;
-  const { searchParams, origin } = new URL(req.url);
+  const { BOT_TOKEN, WEBHOOK_SECRET } = process.env;
+  const { origin } = new URL(req.url);
 
-  if (!ADMIN_PASSWORD || searchParams.get("password") !== ADMIN_PASSWORD) {
+  if (!(await isAdmin())) {
     return new Response("Unauthorized", { status: 401 });
   }
   if (!BOT_TOKEN || !WEBHOOK_SECRET) {

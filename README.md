@@ -4,7 +4,7 @@
 1. `npm install`
 2. در Supabase یک پروژه بسازید و از بخش **Connect**، رشته اتصال PostgreSQL را بردارید. برای Vercel از **Transaction pooler** استفاده کنید.
 3. فایل `.env.example` را به `.env.local` کپی و مقادیر را پر کنید؛ رشته اتصال Supabase را در `DATABASE_URL` قرار دهید.
-4. `ADMIN_PASSWORD` را برای دسترسی به پنل مدیریت تنظیم کنید
+4. `ADMIN_PASSWORD` را برای دسترسی به پنل مدیریت تنظیم کنید و یک `SESSION_SECRET` تصادفی ۶۴ کاراکتری بسازید؛ آن را هم در `.env.local` و هم در Environment Variables و Vercel تنظیم کنید.
 5. `npm run db:push`  ← ساخت جدول‌ها در Supabase
 6. پروژه را روی GitHub بگذارید و در Vercel ایمپورت کنید
    (Environment Variables را هم در Vercel وارد کنید)
@@ -16,6 +16,7 @@
 ## پنل مدیریت
 - صفحه `/admin` فقط با ورود به سیستم قابل دسترسی است.
 - رمز عبور پنل از متغیر `ADMIN_PASSWORD` خوانده می‌شود.
+- ورود از `/admin/login` انجام می‌شود و نشست مدیریت با `SESSION_SECRET` امضا می‌شود.
 
 ## نکته
 - Node.js نسخه 20 یا بالاتر لازم است.
