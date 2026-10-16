@@ -70,3 +70,34 @@ export function quotaExceededMessage(feature: Feature) {
     `ریست سهمیه: ${formatResetIn()} دیگر`,
   ].join("\n");
 }
+
+
+// ---------- توکن و ویس ----------
+
+function intEnv(name: string, def: number) {
+  const raw = process.env[name];
+  if (raw === undefined || raw === "") return def;
+  const n = Number(raw);
+  return Number.isInteger(n) && n >= 0 ? n : def;
+}
+
+export const TOKENS = {
+  dailyFree: intEnv("TOKENS_DAILY_FREE", 10),
+  dailyPro: intEnv("TOKENS_DAILY_PRO", 50),
+} as const;
+
+export const VOICE = {
+  maxSeconds: 600,
+  maxBytes: 6 * 1024 * 1024,
+  staleJobMs: 120_000,
+  // به ترتیب صعودی؛ مدت (ثانیه‌ی گردشده به بالا) در اولین ردیفی که جا شود، قرار می‌گیرد
+  tiers: [
+    { maxSec: 59, cost: 2, pro: false },
+    { maxSec: 300, cost: 5, pro: false },
+    { maxSec: 600, cost: 10, pro: true },
+  ],
+} as const;
+
+export function pickVoiceTier(sec: number) {
+  return VOICE.tiers.find((t) => sec <= t.maxSec) ?? null;
+}

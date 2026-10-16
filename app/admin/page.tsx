@@ -36,6 +36,26 @@ export default async function AdminPage({
     revalidatePath("/admin");
   }
 
+  async function setPro(formData: FormData) {
+    "use server";
+    if (!(await isAdmin())) redirect("/admin/login");
+    const id = Number(formData.get("id"));
+    const days = Number(formData.get("days"));
+    if (!Number.isSafeInteger(id) || !Number.isInteger(days) || days < 0 || days > 3650) return;
+
+    await getDb()
+      .update(users)
+      .set({
+        // days=0 یعنی لغو؛ در غیر این صورت به انتهای اشتراک فعلی اضافه می‌شود
+        proUntil:
+          days === 0
+            ? null
+            : sql`greatest(coalesce(${users.proUntil}, now()), now()) + make_interval(days => ${days}::int)`,
+      })
+      .where(eq(users.telegramId, id));
+    revalidatePath("/admin");
+  }
+
   async function logout() {
     "use server";
     await destroyAdminSession();
@@ -101,6 +121,8 @@ export default async function AdminPage({
             <th>نام</th>
             <th>آخرین فعالیت</th>
             <th>وضعیت</th>
+            <th>پرو تا</th>
+            <th></th>
             <th></th>
           </tr>
         </thead>
@@ -112,6 +134,14 @@ export default async function AdminPage({
               <td>{u.firstName ?? "—"}</td>
               <td>{u.lastSeenAt.toISOString().slice(0, 16).replace("T", " ")}</td>
               <td>{u.isBanned ? "⛔️ مسدود" : "✅ فعال"}</td>
+              <td>{u.proUntil ? u.proUntil.toISOString().slice(0, 10) : "—"}</td>
+              <td>
+                <form action={setPro}>
+                  <input type="hidden" name="id" value={u.telegramId} />
+                  <input type="hidden" name="days" value="30" />
+                  <button type="submit">+۳۰ روز پرو</button>
+                </form>
+              </td>
               <td>
                 <form action={setBan}>
                   <input type="hidden" name="id" value={u.telegramId} />

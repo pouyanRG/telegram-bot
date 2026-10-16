@@ -4,12 +4,19 @@ import { isAdmin } from "@/lib/adminAuth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+export const maxDuration = 60; // پلن Hobby را چک کن
+
+let _handler: ((req: Request) => Promise<Response>) | null = null;
 
 export async function POST(req: Request) {
-  const handler = webhookCallback(getBot(), "std/http", {
-    secretToken: process.env.WEBHOOK_SECRET,
+  const secret = process.env.WEBHOOK_SECRET;
+  if (!secret) return new Response("Server misconfigured", { status: 500 });
+
+  _handler ??= webhookCallback(getBot(), "std/http", {
+    secretToken: secret,
+    timeoutMilliseconds: 55_000,
   });
-  return handler(req);
+  return _handler(req);
 }
 
 export async function GET(req: Request) {

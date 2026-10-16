@@ -2,6 +2,7 @@ import { Bot, GrammyError, InlineKeyboard, type Context } from "grammy";
 import { getPrices, formatPrices, findCoin, formatCoin } from "./prices";
 import { userGuard } from "./middleware";
 import { mainMenu } from "./menu";
+import { handleVoice, voiceGuide } from "./voice";
 
 let _bot: Bot | null = null;
 
@@ -93,6 +94,14 @@ export function getBot() {
       });
     }
   });
+
+  bot.callbackQuery("menu:voice", async (ctx) => {
+  await ctx.answerCallbackQuery();
+  await voiceGuide(ctx);
+});
+
+bot.on("message:voice", handleVoice);
+bot.on("message:audio", (ctx) => ctx.reply("فعلاً فقط ویس تلگرام پشتیبانی می‌شود 🎙"));
 
   // ---------- بخش‌های در دست ساخت ----------
   bot.callbackQuery(/^menu:/, (ctx) =>

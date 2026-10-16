@@ -33,6 +33,9 @@ export async function userGuard(ctx: Context, next: NextFunction) {
     }
   } catch (e) {
     console.error("userGuard DB error:", e);
+    if (ctx.callbackQuery) await ctx.answerCallbackQuery().catch(() => {});
+    await ctx.reply("⚠️ مشکل موقت. کمی بعد دوباره امتحان کن.").catch(() => {});
+    return;
   }
 
   await next();
