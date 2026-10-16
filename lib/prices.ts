@@ -181,7 +181,7 @@ export function formatPrices(s: Snapshot, updatedAt?: Date) {
     `<pre>${table}</pre>`,
   ];
 
-   // اسپویلر: فقط مقدار مخفی است و برچسب دیده می‌شود
+  // اسپویلر: فقط مقدار مخفی است و برچسب دیده می‌شود
   if (best && worst && best.symbol !== worst.symbol) {
     const LRM = "\u200E"; // برای جلوگیری از به‌هم‌ریختگی متن انگلیسی داخل جمله‌ی فارسی
     const worstCh = worst.p.usd_24h_change!;
@@ -215,11 +215,10 @@ export function formatPrices(s: Snapshot, updatedAt?: Date) {
 
   if (s.fng) {
     const f = FNG_FA[s.fng.label] ?? { text: esc(s.fng.label), icon: "⬜️" };
-    const filled = Math.max(0, Math.min(10, Math.round(s.fng.value / 10)));
     out.push(
       "",
-      `${RLM}${f.icon} <b>شاخص ترس و طمع:</b> ${s.fng.value} از ۱۰۰ (${f.text})`,
-      `${RLM}${"🟩".repeat(filled)}${"⬜".repeat(10 - filled)}`
+      `${RLM}${f.icon} <b>شاخص ترس و طمع:</b> ${s.fng.value} (${f.text})`,
+      `<code>${gauge(s.fng.value)}</code>`
     );
   }
 
