@@ -181,12 +181,18 @@ export function formatPrices(s: Snapshot, updatedAt?: Date) {
     `<pre>${table}</pre>`,
   ];
 
-  // اسپویلر: کاربر لمس می‌کند تا ببیند
+   // اسپویلر: فقط مقدار مخفی است و برچسب دیده می‌شود
   if (best && worst && best.symbol !== worst.symbol) {
+    const LRM = "\u200E"; // برای جلوگیری از به‌هم‌ریختگی متن انگلیسی داخل جمله‌ی فارسی
+    const worstCh = worst.p.usd_24h_change!;
+    const worstLabel = worstCh < 0 ? "بیشترین افت" : "کمترین رشد";
+    const worstIcon = worstCh < 0 ? "🩸" : "🐢";
+
     out.push(
       "",
-      `${RLM}🎯 <b>برترین‌های امروز</b> (برای دیدن لمس کن):`,
-      `<tg-spoiler>${RLM}🚀 ${esc(best.symbol)} ${pctText(best.p.usd_24h_change)}   🩸 ${esc(worst.symbol)} ${pctText(worst.p.usd_24h_change)}</tg-spoiler>`
+      `${RLM}🎯 <b>برترین‌های ۲۴ ساعت</b> <i>(برای دیدن لمس کن)</i>`,
+      `${RLM}🚀 بیشترین رشد: <tg-spoiler>${LRM}${esc(best.symbol)} ${pctText(best.p.usd_24h_change)}${LRM}</tg-spoiler>`,
+      `${RLM}${worstIcon} ${worstLabel}: <tg-spoiler>${LRM}${esc(worst.symbol)} ${pctText(worstCh)}${LRM}</tg-spoiler>`
     );
   }
 
@@ -209,10 +215,11 @@ export function formatPrices(s: Snapshot, updatedAt?: Date) {
 
   if (s.fng) {
     const f = FNG_FA[s.fng.label] ?? { text: esc(s.fng.label), icon: "⬜️" };
+    const filled = Math.max(0, Math.min(10, Math.round(s.fng.value / 10)));
     out.push(
       "",
-      `${RLM}${f.icon} <b>شاخص ترس و طمع:</b> ${s.fng.value} (${f.text})`,
-      `<code>${gauge(s.fng.value)}</code>`
+      `${RLM}${f.icon} <b>شاخص ترس و طمع:</b> ${s.fng.value} از ۱۰۰ (${f.text})`,
+      `${RLM}${"🟩".repeat(filled)}${"⬜".repeat(10 - filled)}`
     );
   }
 
