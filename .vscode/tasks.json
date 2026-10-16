@@ -1,0 +1,351 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "Install and build nested project",
+			"type": "shell",
+			"command": "cd my-bot && npm install && npm run build",
+			"isBackground": false,
+			"problemMatcher": []
+		},
+		{
+			"label": "Check nested project Git remotes",
+			"type": "shell",
+			"command": "git",
+			"args": [
+				"-C",
+				"C:\\Users\\PSK\\Desktop\\my-bot\\my-bot",
+				"remote",
+				"-v"
+			],
+			"isBackground": false,
+			"problemMatcher": []
+		},
+		{
+			"label": "Initialize project Git repository",
+			"type": "shell",
+			"command": "git",
+			"args": [
+				"-C",
+				"C:\\Users\\PSK\\Desktop\\my-bot\\my-bot",
+				"init"
+			],
+			"isBackground": false,
+			"problemMatcher": []
+		},
+		{
+			"label": "Add GitHub origin remote",
+			"type": "shell",
+			"command": "git",
+			"args": [
+				"-C",
+				"C:\\Users\\PSK\\Desktop\\my-bot\\my-bot",
+				"remote",
+				"add",
+				"origin",
+				"https://github.com/pouyanRG/telegram-bot.git"
+			],
+			"isBackground": false,
+			"problemMatcher": []
+		},
+		{
+			"label": "Verify GitHub origin remote",
+			"type": "shell",
+			"command": "git",
+			"args": [
+				"-C",
+				"C:\\Users\\PSK\\Desktop\\my-bot\\my-bot",
+				"remote",
+				"-v"
+			],
+			"isBackground": false,
+			"problemMatcher": []
+		},
+		{
+			"label": "Check repository working tree",
+			"type": "shell",
+			"command": "git",
+			"args": [
+				"-C",
+				"C:\\Users\\PSK\\Desktop\\my-bot\\my-bot",
+				"status",
+				"--short",
+				"--branch"
+			],
+			"isBackground": false,
+			"problemMatcher": []
+		},
+		{
+			"label": "Install Supabase PostgreSQL driver",
+			"type": "shell",
+			"command": "npm",
+			"args": [
+				"install",
+				"--prefix",
+				"C:\\Users\\PSK\\Desktop\\my-bot\\my-bot"
+			],
+			"isBackground": false,
+			"problemMatcher": []
+		},
+		{
+			"label": "Build after database migration",
+			"type": "shell",
+			"command": "npm",
+			"args": [
+				"run",
+				"build",
+				"--prefix",
+				"C:\\Users\\PSK\\Desktop\\my-bot\\my-bot"
+			],
+			"isBackground": false,
+			"problemMatcher": []
+		},
+		{
+			"label": "Inspect project repository state",
+			"type": "shell",
+			"command": "git",
+			"args": [
+				"-C",
+				"C:\\Users\\PSK\\Desktop\\my-bot\\my-bot",
+				"status",
+				"--short",
+				"--branch"
+			],
+			"isBackground": false,
+			"problemMatcher": []
+		},
+		{
+			"label": "Verify project GitHub remote",
+			"type": "shell",
+			"command": "git",
+			"args": [
+				"-C",
+				"C:\\Users\\PSK\\Desktop\\my-bot\\my-bot",
+				"remote",
+				"-v"
+			],
+			"isBackground": false,
+			"problemMatcher": []
+		},
+		{
+			"label": "Review pending change summary",
+			"type": "shell",
+			"command": "git",
+			"args": [
+				"-C",
+				"C:\\Users\\PSK\\Desktop\\my-bot\\my-bot",
+				"diff",
+				"--stat"
+			],
+			"isBackground": false,
+			"problemMatcher": []
+		},
+		{
+			"label": "Stage app project changes",
+			"type": "shell",
+			"command": "git",
+			"args": [
+				"-C",
+				"C:\\Users\\PSK\\Desktop\\my-bot\\my-bot",
+				"add",
+				"."
+			],
+			"isBackground": false,
+			"problemMatcher": []
+		},
+		{
+			"label": "Review staged project changes",
+			"type": "shell",
+			"command": "git",
+			"args": [
+				"-C",
+				"C:\\Users\\PSK\\Desktop\\my-bot\\my-bot",
+				"status",
+				"--short"
+			],
+			"isBackground": false,
+			"problemMatcher": []
+		},
+		{
+			"label": "Verify local secrets stay untracked",
+			"type": "shell",
+			"command": "git",
+			"args": [
+				"-C",
+				"C:\\Users\\PSK\\Desktop\\my-bot\\my-bot",
+				"check-ignore",
+				"-v",
+				".env.local"
+			],
+			"isBackground": false,
+			"problemMatcher": []
+		},
+		{
+			"label": "Commit Supabase project updates",
+			"type": "shell",
+			"command": "git",
+			"args": [
+				"-C",
+				"C:\\Users\\PSK\\Desktop\\my-bot\\my-bot",
+				"commit",
+				"-m",
+				"Use Supabase PostgreSQL",
+				"-m",
+				"Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>"
+			],
+			"isBackground": false,
+			"problemMatcher": []
+		},
+		{
+			"label": "Push project commit to GitHub",
+			"type": "shell",
+			"command": "git",
+			"args": [
+				"-C",
+				"C:\\Users\\PSK\\Desktop\\my-bot\\my-bot",
+				"push",
+				"-u",
+				"origin",
+				"master"
+			],
+			"isBackground": false,
+			"problemMatcher": []
+		},
+		{
+			"label": "Start Next.js development server",
+			"type": "shell",
+			"command": "npm",
+			"args": [
+				"run",
+				"dev",
+				"--prefix",
+				"my-bot"
+			],
+			"isBackground": true,
+			"problemMatcher": []
+		},
+		{
+			"label": "Check outer Git status",
+			"type": "shell",
+			"command": "git",
+			"args": [
+				"status",
+				"--short",
+				"--branch"
+			],
+			"isBackground": false,
+			"problemMatcher": []
+		},
+		{
+			"label": "Check project Git status",
+			"type": "shell",
+			"command": "git",
+			"args": [
+				"-C",
+				"my-bot",
+				"status",
+				"--short",
+				"--branch"
+			],
+			"isBackground": false,
+			"problemMatcher": []
+		},
+		{
+			"label": "Create phase 1 branch",
+			"type": "shell",
+			"command": "git",
+			"args": [
+				"-C",
+				"my-bot",
+				"switch",
+				"-c",
+				"phase-1"
+			],
+			"isBackground": false,
+			"problemMatcher": []
+		},
+		{
+			"label": "Push phase 1 schema",
+			"type": "shell",
+			"command": "npm",
+			"args": [
+				"run",
+				"db:push",
+				"--prefix",
+				"my-bot"
+			],
+			"isBackground": false,
+			"problemMatcher": []
+		},
+		{
+			"label": "Retry schema push without prompts",
+			"type": "shell",
+			"command": "npm",
+			"args": [
+				"run",
+				"db:push",
+				"--prefix",
+				"my-bot",
+				"--",
+				"--force"
+			],
+			"isBackground": false,
+			"problemMatcher": []
+		},
+		{
+			"label": "Set local session secret",
+			"type": "shell",
+			"command": "node",
+			"args": [
+				"-e",
+				"const fs=require('node:fs'); const crypto=require('node:crypto'); const p='my-bot/.env.local'; let s=fs.readFileSync(p,'utf8'); if (/^SESSION_SECRET=/m.test(s)) { console.log('SESSION_SECRET already exists'); } else { s += (s.endsWith('\\n') ? '' : '\\n') + 'SESSION_SECRET=' + crypto.randomBytes(32).toString('hex') + '\\n'; fs.writeFileSync(p,s); console.log('SESSION_SECRET added to .env.local'); }"
+			],
+			"isBackground": false,
+			"problemMatcher": []
+		},
+		{
+			"label": "Add local session secret",
+			"type": "shell",
+			"command": "node",
+			"args": [
+				"-e",
+				"const fs=require(\"node:fs\"); const crypto=require(\"node:crypto\"); const p=\"my-bot/.env.local\"; let s=fs.readFileSync(p,\"utf8\"); if (/^SESSION_SECRET=/m.test(s)) { console.log(\"SESSION_SECRET already exists\"); } else { s += (s.endsWith(\"\\n\") ? \"\" : \"\\n\") + \"SESSION_SECRET=\" + crypto.randomBytes(32).toString(\"hex\") + \"\\n\"; fs.writeFileSync(p,s); console.log(\"SESSION_SECRET added to .env.local\"); }"
+			],
+			"isBackground": false,
+			"problemMatcher": []
+		},
+		{
+			"label": "Generate local session secret",
+			"type": "shell",
+			"command": "node",
+			"args": [
+				"my-bot/.ensure-session-secret.mjs"
+			],
+			"isBackground": false,
+			"problemMatcher": []
+		},
+		{
+			"label": "Ensure local session secret",
+			"type": "shell",
+			"command": "node",
+			"args": [
+				"my-bot/.ensure-session-secret.mjs"
+			],
+			"isBackground": false,
+			"problemMatcher": []
+		},
+		{
+			"label": "Typecheck phase 1",
+			"type": "shell",
+			"command": "npx",
+			"args": [
+				"tsc",
+				"--noEmit",
+				"--project",
+				"my-bot/tsconfig.json"
+			],
+			"isBackground": false,
+			"problemMatcher": []
+		}
+	]
+}
