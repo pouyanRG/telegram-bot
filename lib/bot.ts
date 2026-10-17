@@ -1,4 +1,4 @@
-import { Bot, GrammyError, InlineKeyboard, Keyboard, type Context } from "grammy";
+import { Bot, GrammyError, InlineKeyboard, type Context } from "grammy";
 import {
   addAdmin,
   isAdminUser,
@@ -17,6 +17,7 @@ import { getPrices, formatPrices, findCoin, formatCoin } from "./prices";
 import { dedupeUpdates, userGuard } from "./middleware";
 import { mainMenu } from "./menu";
 import { handleVoice, voiceGuide } from "./voice";
+import { clearMode, setVoiceMode } from "./mode";
 
 let _bot: Bot | null = null;
 
@@ -24,13 +25,15 @@ let _bot: Bot | null = null;
 
 const WELCOME = "👋 <b>سلام!</b>\nیکی از بخش‌های زیر را انتخاب کن:";
 
+const SETTINGS_TEXT = "⚙️ <b>Setting</b>\nیکی از گزینه‌ها را انتخاب کن:";
+
 const HELP_USER = [
   "ℹ️ <b>راهنما</b>",
   "",
   "▫️ /menu — منوی اصلی",
   "▫️ /prices — وضعیت بازار و قیمت‌ها",
   "▫️ نام یا نماد هر ارز (مثل <code>btc</code> یا <code>solana</code> یا <code>بیت‌کوین</code>) را بفرست تا قیمتش را ببینی",
-  "▫️ یک ویس بفرست تا به متن تبدیل شود",
+  "▫️ برای تبدیل ویس به متن، از منو «🎙 ویس به متن» را بزن و بعد ویس بفرست",
   "",
   "<i>ربات در حال توسعه است و بخش‌ها به‌تدریج فعال می‌شوند.</i>",
 ].join("\n");
@@ -38,7 +41,7 @@ const HELP_USER = [
 const HELP_ADMIN = [
   "",
   "🛠 <b>بخش ادمین</b>",
-  "▫️ دکمه‌ی «تنظیم استیکر فکرکردن» — استیکری که هنگام پردازش هوش مصنوعی نمایش داده می‌شود",
+  "▫️ منو ← «⚙️ Setting» — تنظیمات ادمین (مثل استیکر فکرکردن)",
 ].join("\n");
 
 const HELP_OWNER = [
@@ -83,11 +86,6 @@ function normalizeFa(s: string) {
 
 // ---------- کیبوردها ----------
 
-const STICKER_BTN = "🎞 تنظیم استیکر فکرکردن";
-
-// کیبورد ثابت پایین چت؛ فقط به چت ادمین‌ها فرستاده می‌شود
-const adminKb = new Keyboard().text(STICKER_BTN).resized().persistent();
-
 const homeKb = new InlineKeyboard().text("🏠 منوی اصلی", "menu:home");
 
 const pricesKb = new InlineKeyboard()
@@ -96,6 +94,15 @@ const pricesKb = new InlineKeyboard()
   .text("🏠 منوی اصلی", "menu:home");
 
 const cancelStickerKb = new InlineKeyboard().text("❌ انصراف", "admin:sticker_cancel");
+
+const backToSettingsKb = new InlineKeyboard().text("🔙 برگشت", "menu:settings");
+
+/** دکمه‌های تنظیمات؛ فقط بعد از زدن «Setting» دیده می‌شوند و با «برگشت» از بین می‌روند */
+function settingsKb(owner: boolean) {
+  const kb = new InlineKeyboard().text("🎞 تنظیم استیکر فکرکردن", "admin:sticker").row();
+  if (owner) kb.text("👥 فهرست ادمین‌ها", "admin:list").row();
+  return kb.text("🔙 برگشت", "menu:home");
+}
 
 function coinKb(id: string) {
   return new InlineKeyboard()
@@ -125,6 +132,29 @@ function parseId(raw: unknown) {
   return Number.isSafeInteger(n) && n > 0 ? n : null;
 }
 
+/** منوی اصلی؛ برای ادمین‌ها دکمه‌ی Setting هم دارد */
+async function menuFor(ctx: Context) {
+  const uid = ctx.from?.id;
+  return mainMenu(!!uid && (await isAdminUser(uid)));
+}
+
+/** هر بار که کاربر در منو جابه‌جا می‌شود: ویس غیرفعال و حالت انتظار استیکر لغو می‌شود */
+async function resetState(ctx: Context) {
+  const uid = ctx.from?.id;
+  if (!uid) return;
+  await Promise.all([clearMode(uid), takePendingSticker(uid)]).catch((e) =>
+    console.error("resetState error:", e)
+  );
+}
+
+/** برای دکمه‌های مخصوص ادمین */
+async function requireAdminCb(ctx: Context) {
+  const uid = ctx.from?.id;
+  if (uid && (await isAdminUser(uid))) return true;
+  await ctx.answerCallbackQuery({ text: "⛔️ فقط ادمین", show_alert: true }).catch(() => {});
+  return false;
+}
+
 async function sendPrices(ctx: Context) {
   await ctx.replyWithChatAction("typing");
   try {
@@ -152,14 +182,18 @@ export function getBot() {
   // ================= دستورهای عمومی =================
 
   bot.command(["start", "menu"], async (ctx) => {
-    await ctx.reply(WELCOME, { ...HTML, reply_markup: mainMenu() });
-    // کیبورد پایین فقط برای ادمین‌ها (ادمین اصلی + فرعی)
+    await resetState(ctx);
+    await ctx.reply(WELCOME, { ...HTML, reply_markup: await menuFor(ctx) });
+
+    // پاک‌کردن کیبورد ثابت قدیمی ادمین‌ها (بعد از مدتی می‌توانی این بلوک را حذف کنی)
     if (ctx.from && (await isAdminUser(ctx.from.id))) {
-      await ctx.reply("🛠 دکمه‌های ادمین فعال شد.", { reply_markup: adminKb });
+      const tmp = await ctx.reply("⚙️", { reply_markup: { remove_keyboard: true } }).catch(() => null);
+      if (tmp && ctx.chat) await ctx.api.deleteMessage(ctx.chat.id, tmp.message_id).catch(() => {});
     }
   });
 
   bot.command("help", async (ctx) => {
+    await resetState(ctx);
     const id = ctx.from?.id;
     let text = HELP_USER;
     if (id && (await isAdminUser(id))) text += "\n" + HELP_ADMIN;
@@ -167,15 +201,28 @@ export function getBot() {
     await ctx.reply(text, { ...HTML, reply_markup: homeKb });
   });
 
-  bot.command("prices", sendPrices);
+  bot.command("prices", async (ctx) => {
+    await resetState(ctx);
+    await sendPrices(ctx);
+  });
 
   // ================= بخش ادمین =================
 
-  // --- دکمه‌ی «تنظیم استیکر فکرکردن» ---
-  bot.hears(STICKER_BTN, async (ctx) => {
-    const uid = ctx.from?.id;
-    if (!uid || !(await isAdminUser(uid))) return; // برای غیرادمین هیچ واکنشی نیست
+  // --- ورود به تنظیمات (فقط ادمین) ---
+  bot.callbackQuery("menu:settings", async (ctx) => {
+    if (!(await requireAdminCb(ctx))) return;
+    await ctx.answerCallbackQuery();
+    await resetState(ctx);
+    await editOrReply(ctx, SETTINGS_TEXT, settingsKb(isOwner(ctx.from.id)));
+  });
 
+  // --- تنظیم استیکر فکرکردن ---
+  bot.callbackQuery("admin:sticker", async (ctx) => {
+    if (!(await requireAdminCb(ctx))) return;
+    await ctx.answerCallbackQuery();
+
+    const uid = ctx.from.id;
+    await clearMode(uid);
     await setPendingSticker(uid);
 
     // اگر استیکری از قبل تنظیم شده، پیش‌نمایشش را نشان بده
@@ -183,28 +230,51 @@ export function getBot() {
     if (current) {
       await ctx.reply("استیکر فعلی:");
       await ctx.replyWithSticker(current).catch(() => {});
+    } else {
+      await ctx.reply("الان استیکری تنظیم نیست؛ به‌جایش 🔎 ارسال می‌شود.");
     }
 
-    await ctx.reply(
-      "🎞 حالا استیکر جدید (ترجیحاً متحرک) را بفرست.\n⏳ تا ۱۰ دقیقه معتبر است.",
-      { reply_markup: cancelStickerKb }
-    );
+    await ctx.reply("🎞 حالا استیکر جدید (ترجیحاً متحرک) را بفرست.", {
+      reply_markup: cancelStickerKb,
+    });
   });
 
   bot.callbackQuery("admin:sticker_cancel", async (ctx) => {
-    if (await isAdminUser(ctx.from.id)) await takePendingSticker(ctx.from.id);
+    if (!(await requireAdminCb(ctx))) return;
+    await takePendingSticker(ctx.from.id);
     await ctx.answerCallbackQuery({ text: "لغو شد" });
-    await ctx.editMessageText("❌ تنظیم استیکر لغو شد.").catch(() => {});
+    await editOrReply(ctx, SETTINGS_TEXT, settingsKb(isOwner(ctx.from.id)));
   });
 
-  // --- دریافت استیکر (فقط وقتی ادمین در حالت انتظار است) ---
+  // --- دریافت استیکر (فقط وقتی ادمین در حالت انتظار است؛ بدون محدودیت زمانی) ---
   bot.on("message:sticker", async (ctx) => {
     const uid = ctx.from.id;
     if (!(await isAdminUser(uid))) return;
     if (!(await takePendingSticker(uid))) return;
 
     await setThinkingSticker(ctx.message.sticker.file_id);
-    await ctx.reply("✅ استیکر فکرکردن ذخیره شد. از این به بعد هنگام پردازش هوش مصنوعی نمایش داده می‌شود.");
+    await ctx.reply(
+      "✅ استیکر فکرکردن ذخیره شد. از این به بعد هنگام پردازش هوش مصنوعی نمایش داده می‌شود.",
+      { reply_markup: settingsKb(isOwner(uid)) }
+    );
+  });
+
+  // --- فهرست ادمین‌ها از داخل تنظیمات (فقط ادمین اصلی) ---
+  bot.callbackQuery("admin:list", async (ctx) => {
+    if (!isOwner(ctx.from.id)) {
+      return void (await ctx.answerCallbackQuery({ text: "⛔️ فقط ادمین اصلی", show_alert: true }));
+    }
+    await ctx.answerCallbackQuery();
+    const list = await listAdmins();
+    await editOrReply(
+      ctx,
+      [
+        `👑 ادمین اصلی: ${ownerId()}`,
+        "",
+        ...(list.length ? list.map((a) => `▫️ ${a.userId}`) : ["ادمین فرعی‌ای وجود ندارد."]),
+      ].join("\n"),
+      backToSettingsKb
+    );
   });
 
   // --- فقط ادمین اصلی (صاحب توکن): مدیریت ادمین‌های فرعی ---
@@ -218,9 +288,9 @@ export function getBot() {
 
     await addAdmin(id, owner);
 
-    // به ادمین جدید خبر بده و کیبوردش را فعال کن (اگر قبلاً ربات را استارت کرده باشد)
+    // به ادمین جدید خبر بده (اگر قبلاً ربات را استارت کرده باشد)
     const notified = await ctx.api
-      .sendMessage(id, "🛠 شما به‌عنوان ادمین ربات اضافه شدید.", { reply_markup: adminKb })
+      .sendMessage(id, "🛠 شما به‌عنوان ادمین ربات اضافه شدید. برای دیدن «⚙️ Setting» یک بار /start بزنید.")
       .then(() => true)
       .catch(() => false);
 
@@ -239,10 +309,7 @@ export function getBot() {
     if (id === ownerId()) return void (await ctx.reply("ادمین اصلی قابل حذف نیست."));
 
     await removeAdmin(id);
-    // کیبورد ادمین را از چت او پاک کن (دسترسی سمت سرور هم بسته شده است)
-    await ctx.api
-      .sendMessage(id, "دسترسی ادمین شما برداشته شد.", { reply_markup: { remove_keyboard: true } })
-      .catch(() => {});
+    await ctx.api.sendMessage(id, "دسترسی ادمین شما برداشته شد.").catch(() => {});
     await ctx.reply(`🗑 ${id} از ادمین‌ها حذف شد.`);
   });
 
@@ -262,11 +329,13 @@ export function getBot() {
 
   bot.callbackQuery("menu:home", async (ctx) => {
     await ctx.answerCallbackQuery();
-    await editOrReply(ctx, WELCOME, mainMenu());
+    await resetState(ctx);
+    await editOrReply(ctx, WELCOME, await menuFor(ctx));
   });
 
   bot.callbackQuery("menu:help", async (ctx) => {
     await ctx.answerCallbackQuery();
+    await resetState(ctx);
     await editOrReply(ctx, HELP_USER, homeKb);
   });
 
@@ -274,6 +343,7 @@ export function getBot() {
 
   bot.callbackQuery("menu:prices", async (ctx) => {
     await ctx.answerCallbackQuery();
+    await resetState(ctx);
     await sendPrices(ctx);
   });
 
@@ -295,8 +365,11 @@ export function getBot() {
 
   // ================= ویس به متن =================
 
+  // فقط با زدن این دکمه فعال می‌شود؛ با «منوی اصلی» یا هر دکمه‌ی دیگر غیرفعال می‌شود
   bot.callbackQuery("menu:voice", async (ctx) => {
     await ctx.answerCallbackQuery();
+    await takePendingSticker(ctx.from.id).catch(() => {});
+    await setVoiceMode(ctx.from.id);
     await voiceGuide(ctx);
   });
 
@@ -307,9 +380,10 @@ export function getBot() {
 
   // ================= بخش‌های در دست ساخت =================
 
-  bot.callbackQuery(/^menu:/, (ctx) =>
-    ctx.answerCallbackQuery({ text: "این بخش به‌زودی فعال می‌شود 🚧" })
-  );
+  bot.callbackQuery(/^menu:/, async (ctx) => {
+    await resetState(ctx);
+    await ctx.answerCallbackQuery({ text: "این بخش به‌زودی فعال می‌شود 🚧" });
+  });
 
   // ================= جستجوی ارز =================
 
@@ -340,7 +414,9 @@ export function getBot() {
 
     // فقط ورودی لاتین کوتاه (یا نام فارسی شناخته‌شده) را به‌عنوان ارز بررسی کن
     if (!SETTINGS.coinQueryPattern.test(query)) {
-      return void (await ctx.reply("برای دیدن بخش‌ها /menu را بزن.", { reply_markup: mainMenu() }));
+      return void (await ctx.reply("برای دیدن بخش‌ها /menu را بزن.", {
+        reply_markup: await menuFor(ctx),
+      }));
     }
 
     // سهمیه‌ی روزانه‌ی جستجوی ارز (ادمین‌ها معاف)
@@ -365,7 +441,7 @@ export function getBot() {
       if (!coin) {
         await refund();
         return void (await ctx.reply("🔎 ارزی با این نام یا نماد پیدا نشد. یک بار دیگر امتحان کن.", {
-          reply_markup: mainMenu(),
+          reply_markup: await menuFor(ctx),
         }));
       }
       await ctx.reply(formatCoin(coin), {

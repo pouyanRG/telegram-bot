@@ -7,9 +7,12 @@ import { downloadTelegramFile } from "./telegramFile";
 import { oggOpusDurationSec } from "./ogg";
 import { withThinking } from "./admins";
 import { transcribeAudio } from "./gemini";
+import { isVoiceMode } from "./mode";
 
 const PRO_REQUIRED = "💎 ویس‌های بین ۵ تا ۱۰ دقیقه فقط برای کاربران پرو فعال است.";
 const TOO_LONG = "⏱ حداکثر مدت ویس ۱۰ دقیقه است.";
+const NOT_ACTIVE =
+  "🎙 برای تبدیل ویس به متن، اول از /menu بخش «ویس به متن» را انتخاب کن و بعد ویس را بفرست.";
 
 const chunk = (s: string, n = 4000) =>
   Array.from({ length: Math.ceil(s.length / n) }, (_, i) => s.slice(i * n, (i + 1) * n));
@@ -45,6 +48,9 @@ export async function handleVoice(ctx: Context) {
   const userId = from.id;
   const reply = (text: string) =>
     ctx.reply(text, { reply_parameters: { message_id: msg.message_id } });
+
+  // ۰) فقط وقتی کاربر بخش «ویس به متن» را از منو باز کرده فعال است
+  if (!(await isVoiceMode(userId))) return void (await reply(NOT_ACTIVE));
 
   // ۱) فیلترهای ارزان، قبل از هر کار پرهزینه
   if (voice.duration > VOICE.maxSeconds) return void (await reply(TOO_LONG));
