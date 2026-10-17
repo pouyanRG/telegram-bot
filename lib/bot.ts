@@ -299,9 +299,10 @@ export function getBot() {
     }
   });
 
-  // متن آزاد: نام یا نماد ارز (باید بعد از همه‌ی hears/commandها بیاید)
-  bot.on("message:text", async (ctx) => {
-    const text = ctx.message.text.trim();
+    // متن آزاد: نام یا نماد ارز (باید بعد از همه‌ی hears/commandها بیاید)
+    bot.on("message:text", async (ctx) => {
+      const text = ctx.message.text.trim();
+      
 
     // فقط ورودی لاتین کوتاه را به‌عنوان نام/نماد ارز بررسی کن
     if (!SETTINGS.coinQueryPattern.test(text)) {
