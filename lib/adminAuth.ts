@@ -9,7 +9,10 @@ const IS_PROD = process.env.NODE_ENV === "production";
 // پیشوند __Host- یعنی فقط Secure، بدون Domain و روی مسیر / (فقط در پروداکشن)
 const COOKIE = IS_PROD ? "__Host-admin_session" : "admin_session";
 const MAX_AGE = 60 * 60 * 8; // ۸ ساعت
-const VERSION = "v1";
+const VERSION = "v2";
+
+// نشست‌هایی که قبل از این زمان صادر شده‌اند باطل‌اند (با خروج ثبت می‌شود)
+const REVOKE_KEY = "admin_revoked_before";
 
 const MAX_ATTEMPTS = 5;
 const LOCK_WINDOW_MS = 15 * 60 * 1000;
@@ -49,8 +52,9 @@ export function passwordMatches(input: string) {
 // ---------- نشست ----------
 
 export async function createAdminSession() {
-  const exp = String(Date.now() + MAX_AGE * 1000);
-  const payload = `${VERSION}.${exp}`;
+  const iat = Date.now();
+  const exp = iat + MAX_AGE * 1000;
+  const payload = `${VERSION}.${iat}.${exp}`;
   (await cookies()).set(COOKIE, `${payload}.${sign(payload)}`, {
     httpOnly: true,
     secure: IS_PROD,
@@ -61,6 +65,17 @@ export async function createAdminSession() {
 }
 
 export async function destroyAdminSession() {
+  // ابطال سمت سرور: هر توکنی که تا الان صادر شده دیگر معتبر نیست
+  try {
+    const data = { at: Date.now() };
+    await getDb()
+      .insert(cache)
+      .values({ key: REVOKE_KEY, data })
+      .onConflictDoUpdate({ target: cache.key, set: { data, updatedAt: new Date() } });
+  } catch (e) {
+    console.error("destroyAdminSession revoke error:", e);
+  }
+
   (await cookies()).set(COOKIE, "", {
     httpOnly: true,
     secure: IS_PROD,
@@ -73,21 +88,30 @@ export async function destroyAdminSession() {
 export async function isAdmin() {
   try {
     const raw = (await cookies()).get(COOKIE)?.value;
-    if (!raw || raw.length > 200) return false;
+    if (!raw || raw.length > 250) return false;
 
     const parts = raw.split(".");
-    if (parts.length !== 3 || parts[0] !== VERSION) return false;
+    if (parts.length !== 4 || parts[0] !== VERSION) return false;
 
-    const [, exp, sig] = parts;
-    if (!safeEqual(sig, sign(`${VERSION}.${exp}`))) return false;
+    const [, iatStr, expStr, sig] = parts;
+    if (!safeEqual(sig, sign(`${VERSION}.${iatStr}.${expStr}`))) return false;
 
-    const expiresAt = Number(exp);
+    const issuedAt = Number(iatStr);
+    const expiresAt = Number(expStr);
     const now = Date.now();
-    return (
-      Number.isFinite(expiresAt) &&
-      expiresAt > now &&
-      expiresAt <= now + MAX_AGE * 1000 + 60_000
-    );
+    if (
+      !Number.isFinite(issuedAt) ||
+      !Number.isFinite(expiresAt) ||
+      expiresAt <= now ||
+      expiresAt > now + MAX_AGE * 1000 + 60_000
+    ) {
+      return false;
+    }
+
+    // اگر دیتابیس در دسترس نباشد، به‌صورت ایمن «ادمین نیست» برمی‌گردد (catch پایین)
+    const [row] = await getDb().select().from(cache).where(eq(cache.key, REVOKE_KEY));
+    const revokedAt = (row?.data as { at?: number } | undefined)?.at ?? 0;
+    return issuedAt > revokedAt;
   } catch (e) {
     console.error("isAdmin error:", e);
     return false;
@@ -104,8 +128,12 @@ type Attempts = { count: number; resetAt: number };
 
 async function clientKey() {
   const h = await headers();
+  // x-vercel-forwarded-for توسط Vercel تنظیم می‌شود و کاربر نمی‌تواند جعلش کند
   const ip =
-    h.get("x-real-ip") ?? h.get("x-forwarded-for")?.split(",")[0]?.trim() ?? "unknown";
+    h.get("x-vercel-forwarded-for")?.split(",")[0]?.trim() ??
+    h.get("x-real-ip") ??
+    h.get("x-forwarded-for")?.split(",")[0]?.trim() ??
+    "unknown";
   return `admin_login:${ip.slice(0, 64)}`;
 }
 

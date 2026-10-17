@@ -1,6 +1,8 @@
+import { sql } from "drizzle-orm";
 import {
   bigint,
   boolean,
+  index,
   integer,
   jsonb,
   pgTable,
@@ -8,35 +10,40 @@ import {
   serial,
   text,
   timestamp,
+  uniqueIndex,
 } from "drizzle-orm/pg-core";
 
-import { sql } from "drizzle-orm";
-import { index, uniqueIndex } from "drizzle-orm/pg-core";
+// همه‌ی ستون‌های زمانی با timezone ذخیره می‌شوند (timestamptz)
+const ts = (name: string) => timestamp(name, { withTimezone: true });
 
 export const users = pgTable("users", {
   telegramId: bigint("telegram_id", { mode: "number" }).primaryKey(),
   username: text("username"),
   firstName: text("first_name"),
   language: text("language"),
-  proUntil: timestamp("pro_until"),
+  proUntil: ts("pro_until"),
   isBanned: boolean("is_banned").default(false).notNull(),
-  createdAt: timestamp("created_at").defaultNow().notNull(),
-  lastSeenAt: timestamp("last_seen_at").defaultNow().notNull(),
+  createdAt: ts("created_at").defaultNow().notNull(),
+  lastSeenAt: ts("last_seen_at").defaultNow().notNull(),
 });
 
 export const bans = pgTable("bans", {
   id: serial("id").primaryKey(),
-  userId: bigint("user_id", { mode: "number" }).notNull(),
+  userId: bigint("user_id", { mode: "number" })
+    .notNull()
+    .references(() => users.telegramId, { onDelete: "cascade" }),
   reason: text("reason"),
   bannedBy: text("banned_by").default("admin").notNull(),
-  bannedAt: timestamp("banned_at").defaultNow().notNull(),
-  unbannedAt: timestamp("unbanned_at"),
+  bannedAt: ts("banned_at").defaultNow().notNull(),
+  unbannedAt: ts("unbanned_at"),
 });
 
 export const quotas = pgTable(
   "quotas",
   {
-    userId: bigint("user_id", { mode: "number" }).notNull(),
+    userId: bigint("user_id", { mode: "number" })
+      .notNull()
+      .references(() => users.telegramId, { onDelete: "cascade" }),
     feature: text("feature").notNull(),
     day: text("day").notNull(),
     used: integer("used").default(0).notNull(),
@@ -49,14 +56,16 @@ export const quotas = pgTable(
 export const cache = pgTable("cache", {
   key: text("key").primaryKey(),
   data: jsonb("data").notNull(),
-  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+  updatedAt: ts("updated_at").defaultNow().notNull(),
 });
 
 export const voiceJobs = pgTable(
   "voice_jobs",
   {
     id: serial("id").primaryKey(),
-    userId: bigint("user_id", { mode: "number" }).notNull(),
+    userId: bigint("user_id", { mode: "number" })
+      .notNull()
+      .references(() => users.telegramId, { onDelete: "cascade" }),
     chatId: bigint("chat_id", { mode: "number" }).notNull(),
     messageId: integer("message_id").notNull(),
     fileUniqueId: text("file_unique_id").notNull(),
@@ -66,8 +75,8 @@ export const voiceJobs = pgTable(
     status: text("status").default("processing").notNull(),
     chargedCost: integer("charged_cost").default(0).notNull(),
     chargedDay: text("charged_day"),
-    createdAt: timestamp("created_at").defaultNow().notNull(),
-    finishedAt: timestamp("finished_at"),
+    createdAt: ts("created_at").defaultNow().notNull(),
+    finishedAt: ts("finished_at"),
   },
   (t) => ({
     // ضد تکرار وبهوک تلگرام
@@ -83,5 +92,17 @@ export const voiceJobs = pgTable(
 export const admins = pgTable("admins", {
   userId: bigint("user_id", { mode: "number" }).primaryKey(),
   addedBy: bigint("added_by", { mode: "number" }).notNull(),
-  createdAt: timestamp("created_at").defaultNow().notNull(),
+  createdAt: ts("created_at").defaultNow().notNull(),
 });
+
+// آپدیت‌های پردازش‌شده‌ی تلگرام؛ برای جلوگیری از پردازش تکراری
+export const processedUpdates = pgTable(
+  "processed_updates",
+  {
+    updateId: bigint("update_id", { mode: "number" }).primaryKey(),
+    createdAt: ts("created_at").defaultNow().notNull(),
+  },
+  (t) => ({
+    byCreated: index("processed_updates_created_idx").on(t.createdAt),
+  })
+);

@@ -1,6 +1,7 @@
 import { eq } from "drizzle-orm";
 import { getDb } from "./db";
 import { cache } from "./schema";
+import { SETTINGS } from "./config";
 
 const COINS = [
   { id: "bitcoin", symbol: "BTC" },
@@ -23,7 +24,6 @@ const COINS = [
 ];
 
 const CACHE_KEY = "market";
-const TTL_MS = 2 * 60 * 1000;
 
 export type Snapshot = {
   coins: Record<string, { usd: number; usd_24h_change?: number }>;
@@ -32,10 +32,24 @@ export type Snapshot = {
   usdtToman?: number;
 };
 
+// ---------- کش دیتابیس ----------
+
+async function readCache<T>(key: string) {
+  const [row] = await getDb().select().from(cache).where(eq(cache.key, key));
+  return row ? { data: row.data as T, updatedAt: row.updatedAt } : null;
+}
+
+async function writeCache(key: string, data: unknown, now = new Date()) {
+  await getDb()
+    .insert(cache)
+    .values({ key, data, updatedAt: now })
+    .onConflictDoUpdate({ target: cache.key, set: { data, updatedAt: now } });
+}
+
 // ---------- دریافت داده ----------
 
 async function getJson(url: string, headers: Record<string, string> = {}) {
-  const res = await fetch(url, { headers, signal: AbortSignal.timeout(8000) });
+  const res = await fetch(url, { headers, signal: AbortSignal.timeout(SETTINGS.fetchTimeoutMs) });
   if (!res.ok) throw new Error(`${url} -> ${res.status}`);
   return res.json();
 }
@@ -85,27 +99,34 @@ async function fetchSnapshot(): Promise<Snapshot> {
   return snap;
 }
 
-export async function getPrices() {
-  const db = getDb();
-  const [row] = await db.select().from(cache).where(eq(cache.key, CACHE_KEY));
+type PricesResult = { data: Snapshot; updatedAt: Date };
 
-  if (row && Date.now() - row.updatedAt.getTime() < TTL_MS) {
-    return { data: row.data as Snapshot, updatedAt: row.updatedAt };
+async function loadPrices(): Promise<PricesResult> {
+  const row = await readCache<Snapshot>(CACHE_KEY);
+
+  if (row && Date.now() - row.updatedAt.getTime() < SETTINGS.pricesTtlMs) {
+    return { data: row.data, updatedAt: row.updatedAt };
   }
 
   try {
     const data = await fetchSnapshot();
     const now = new Date();
-    await db
-      .insert(cache)
-      .values({ key: CACHE_KEY, data, updatedAt: now })
-      .onConflictDoUpdate({ target: cache.key, set: { data, updatedAt: now } });
+    await writeCache(CACHE_KEY, data, now);
     return { data, updatedAt: now };
   } catch (e) {
     console.error("Market fetch error:", e);
-    if (row) return { data: row.data as Snapshot, updatedAt: row.updatedAt };
+    if (row) return { data: row.data, updatedAt: row.updatedAt };
     throw e;
   }
+}
+
+// درخواست‌های همزمان در همین instance یک fetch مشترک دارند (ضد هجوم به CoinGecko)
+let _pricesInflight: Promise<PricesResult> | null = null;
+
+export function getPrices(): Promise<PricesResult> {
+  return (_pricesInflight ??= loadPrices().finally(() => {
+    _pricesInflight = null;
+  }));
 }
 
 // ---------- ابزارهای قالب‌بندی ----------
@@ -248,9 +269,6 @@ export type CoinInfo = {
   rank?: number;
 };
 
-const coinMemo = new Map<string, { at: number; value: CoinInfo | null }>();
-const COIN_TTL_MS = 60 * 1000;
-
 async function marketsById(id: string): Promise<CoinInfo | null> {
   const arr = await getJson(
     `https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&ids=${encodeURIComponent(id)}`,
@@ -272,20 +290,18 @@ async function marketsById(id: string): Promise<CoinInfo | null> {
   };
 }
 
-export async function findCoin(
-  query: string,
-  opts: { byId?: boolean } = {}
-): Promise<CoinInfo | null> {
-  const q = query.trim().toLowerCase();
-  if (!q) return null;
+async function lookupCoin(q: string, byId: boolean): Promise<CoinInfo | null> {
+  const key = `coin:${byId ? "id" : "q"}:${q}`;
 
-  const key = `${opts.byId ? "id" : "q"}:${q}`;
-  const hit = coinMemo.get(key);
-  if (hit && Date.now() - hit.at < COIN_TTL_MS) return hit.value;
+  // کش در دیتابیس است تا بین instanceهای serverless مشترک باشد
+  const hit = await readCache<{ value: CoinInfo | null }>(key).catch(() => null);
+  if (hit && Date.now() - hit.updatedAt.getTime() < SETTINGS.coinTtlMs) {
+    return hit.data.value;
+  }
 
   let value: CoinInfo | null = null;
 
-  if (opts.byId) {
+  if (byId) {
     value = await marketsById(q);
   } else {
     const known = COINS.find((c) => c.symbol.toLowerCase() === q || c.id === q);
@@ -300,8 +316,27 @@ export async function findCoin(
     if (id) value = await marketsById(id);
   }
 
-  coinMemo.set(key, { at: Date.now(), value });
+  await writeCache(key, { value }).catch((e) => console.error("coin cache write error:", e));
   return value;
+}
+
+// درخواست‌های همزمان برای یک ارز در همین instance یکی می‌شوند
+const _coinInflight = new Map<string, Promise<CoinInfo | null>>();
+
+export function findCoin(
+  query: string,
+  opts: { byId?: boolean } = {}
+): Promise<CoinInfo | null> {
+  const q = query.trim().toLowerCase();
+  if (!q) return Promise.resolve(null);
+
+  const key = `${opts.byId ? "id" : "q"}:${q}`;
+  const running = _coinInflight.get(key);
+  if (running) return running;
+
+  const p = lookupCoin(q, !!opts.byId).finally(() => _coinInflight.delete(key));
+  _coinInflight.set(key, p);
+  return p;
 }
 
 export function formatCoin(c: CoinInfo) {

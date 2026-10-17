@@ -12,9 +12,9 @@ import {
   takePendingSticker,
 } from "./admins";
 import { SETTINGS, quotaExceededMessage } from "./config";
-import { consumeQuota } from "./quota";
+import { consumeQuota, refundQuota } from "./quota";
 import { getPrices, formatPrices, findCoin, formatCoin } from "./prices";
-import { userGuard } from "./middleware";
+import { dedupeUpdates, userGuard } from "./middleware";
 import { mainMenu } from "./menu";
 import { handleVoice, voiceGuide } from "./voice";
 
@@ -29,7 +29,7 @@ const HELP_USER = [
   "",
   "▫️ /menu — منوی اصلی",
   "▫️ /prices — وضعیت بازار و قیمت‌ها",
-  "▫️ نام یا نماد هر ارز (مثل <code>btc</code> یا <code>solana</code>) را بفرست تا قیمتش را ببینی",
+  "▫️ نام یا نماد هر ارز (مثل <code>btc</code> یا <code>solana</code> یا <code>بیت‌کوین</code>) را بفرست تا قیمتش را ببینی",
   "▫️ یک ویس بفرست تا به متن تبدیل شود",
   "",
   "<i>ربات در حال توسعه است و بخش‌ها به‌تدریج فعال می‌شوند.</i>",
@@ -49,6 +49,37 @@ const HELP_OWNER = [
 
 const HTML = { parse_mode: "HTML" as const };
 const NO_PREVIEW = { link_preview_options: { is_disabled: true } };
+
+// ---------- نام فارسی ارزها ----------
+
+// کلیدها بدون فاصله و نیم‌فاصله و با «ی/ک» فارسی (به normalizeFa نگاه کن)
+const FA_COINS: Record<string, string> = {
+  بیتکوین: "bitcoin",
+  اتریوم: "ethereum",
+  تتر: "tether",
+  بایننسکوین: "binancecoin",
+  ریپل: "ripple",
+  کاردانو: "cardano",
+  سولانا: "solana",
+  دوجکوین: "dogecoin",
+  ترون: "tron",
+  آوالانچ: "avalanche-2",
+  مونرو: "monero",
+  چینلینک: "chainlink",
+  تونکوین: "the-open-network",
+  تون: "the-open-network",
+  لایتکوین: "litecoin",
+  پولکادات: "polkadot",
+  شیبا: "shiba-inu",
+  شیبااینو: "shiba-inu",
+};
+
+function normalizeFa(s: string) {
+  return s
+    .replace(/ي/g, "ی")
+    .replace(/ك/g, "ک")
+    .replace(/[\u200c\s]+/g, "");
+}
 
 // ---------- کیبوردها ----------
 
@@ -114,6 +145,8 @@ export function getBot() {
 
   const bot = new Bot(token);
 
+  // اول ضد تکرار، بعد بررسی کاربر
+  bot.use(dedupeUpdates);
   bot.use(userGuard);
 
   // ================= دستورهای عمومی =================
@@ -299,28 +332,38 @@ export function getBot() {
     }
   });
 
-    // متن آزاد: نام یا نماد ارز (باید بعد از همه‌ی hears/commandها بیاید)
-    bot.on("message:text", async (ctx) => {
-      const text = ctx.message.text.trim();
-      
+  // متن آزاد: نام یا نماد ارز (باید بعد از همه‌ی hears/commandها بیاید)
+  bot.on("message:text", async (ctx) => {
+    const raw = ctx.message.text.trim();
+    // نام فارسی شناخته‌شده به شناسه‌ی CoinGecko تبدیل می‌شود
+    const query = FA_COINS[normalizeFa(raw)] ?? raw;
 
-    // فقط ورودی لاتین کوتاه را به‌عنوان نام/نماد ارز بررسی کن
-    if (!SETTINGS.coinQueryPattern.test(text)) {
+    // فقط ورودی لاتین کوتاه (یا نام فارسی شناخته‌شده) را به‌عنوان ارز بررسی کن
+    if (!SETTINGS.coinQueryPattern.test(query)) {
       return void (await ctx.reply("برای دیدن بخش‌ها /menu را بزن.", { reply_markup: mainMenu() }));
     }
 
     // سهمیه‌ی روزانه‌ی جستجوی ارز (ادمین‌ها معاف)
-    if (!(await isAdminUser(ctx.from.id))) {
-      const q = await consumeQuota(ctx.from.id, "coin");
+    const uid = ctx.from.id;
+    let consumed = false;
+    if (!(await isAdminUser(uid))) {
+      const q = await consumeQuota(uid, "coin");
       if (!q.allowed) {
         return void (await ctx.reply(quotaExceededMessage("coin"), HTML));
       }
+      consumed = true;
     }
+
+    // اگر ارز پیدا نشد یا خطا شد، سهمیه برمی‌گردد
+    const refund = async () => {
+      if (consumed) await refundQuota(uid, "coin").catch((e) => console.error("refund error:", e));
+    };
 
     await ctx.replyWithChatAction("typing");
     try {
-      const coin = await findCoin(text);
+      const coin = await findCoin(query);
       if (!coin) {
+        await refund();
         return void (await ctx.reply("🔎 ارزی با این نام یا نماد پیدا نشد. یک بار دیگر امتحان کن.", {
           reply_markup: mainMenu(),
         }));
@@ -332,6 +375,7 @@ export function getBot() {
       });
     } catch (e) {
       console.error("coin lookup error:", e);
+      await refund();
       await ctx.reply("⚠️ الان نمی‌توانم این ارز را بگیرم. کمی بعد دوباره امتحان کن.");
     }
   });

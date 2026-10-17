@@ -10,6 +10,9 @@ out
 coverage
 *.log
 
+# Editor / local settings (contains absolute local paths)
+.vscode/
+
 # Local backups
 .git-parent-backup/
 .git-project-backup/

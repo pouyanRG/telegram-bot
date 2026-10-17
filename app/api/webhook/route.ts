@@ -13,13 +13,14 @@ export const maxDuration = 60; // سقف پلن Hobby؛ اگر پلن بالات
 const MAX_BODY_BYTES = 1_000_000;
 
 // فقط همین نوع آپدیت‌ها را از تلگرام بگیر (ترافیک کمتر)
-// اگر بعداً inline_query یا چیز دیگری اضافه کردی، اینجا هم اضافه کن
+// اگر بعداً inline_query یا چیز دیگری اضافه کردی، اینجا و در scripts/set-webhook.mjs هم اضافه کن
 const ALLOWED_UPDATES = ["message", "callback_query"];
 
 // حالت «اول تأیید، بعد پردازش»:
 // فوراً 200 به تلگرام می‌دهد و کار اصلی بعد از پاسخ ادامه پیدا می‌کند.
 // نتیجه: تلگرام هیچ‌وقت به‌خاطر کند بودن (ویس طولانی) آپدیت را دوباره نمی‌فرستد.
 // پیش‌فرض خاموش است؛ با WEBHOOK_ACK_FIRST=1 روشن می‌شود.
+// (ضد تکرار آپدیت‌ها در lib/middleware.ts هست، پس در هر دو حالت ایمن است.)
 const ACK_FIRST = process.env.WEBHOOK_ACK_FIRST === "1";
 
 // ---------- ابزارها ----------
@@ -91,9 +92,10 @@ export async function POST(req: Request) {
 }
 
 // ---------- ابزار تشخیص برای ادمین ----------
-// GET /api/webhook            → فقط وضعیت را نشان می‌دهد
-// GET /api/webhook?set=1      → وبهوک را ثبت می‌کند
-// GET /api/webhook?set=1&drop=1 → ثبت + حذف آپدیت‌های معلق‌مانده
+// GET /api/webhook                    → فقط وضعیت را نشان می‌دهد (بدون تغییر)
+// PUT /api/webhook                    → وبهوک را ثبت می‌کند
+// PUT /api/webhook?drop=1             → ثبت + حذف آپدیت‌های معلق‌مانده
+// هر دو فقط با نشست ادمین (کوکی) کار می‌کنند. تغییر وضعیت عمداً با GET نیست.
 
 type Tg = { ok: boolean; result?: Record<string, unknown>; description?: string };
 
@@ -112,7 +114,7 @@ async function tg(token: string, method: string, body?: unknown): Promise<Tg> {
   }
 }
 
-export async function GET(req: Request) {
+async function adminTool(req: Request, doSet: boolean) {
   if (!(await isAdmin())) return new Response("Unauthorized", { status: 401 });
 
   const { BOT_TOKEN, WEBHOOK_SECRET, APP_URL } = process.env;
@@ -129,7 +131,7 @@ export async function GET(req: Request) {
   }
 
   let setResult: Tg | null = null;
-  if (reqUrl.searchParams.get("set") === "1") {
+  if (doSet) {
     setResult = await tg(BOT_TOKEN, "setWebhook", {
       url,
       secret_token: WEBHOOK_SECRET,
@@ -160,6 +162,16 @@ export async function GET(req: Request) {
         ? new Date(i.last_error_date * 1000).toISOString()
         : null,
     set: setResult,
-    hint: urlMatches ? undefined : "وبهوک روی آدرس درست نیست؛ با ?set=1 ثبتش کن.",
+    hint: urlMatches
+      ? undefined
+      : "وبهوک روی آدرس درست نیست؛ با «npm run webhook:set» یا درخواست PUT به همین آدرس ثبتش کن.",
   });
+}
+
+export async function GET(req: Request) {
+  return adminTool(req, false);
+}
+
+export async function PUT(req: Request) {
+  return adminTool(req, true);
 }

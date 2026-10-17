@@ -2,19 +2,27 @@ import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { and, count, desc, eq, gt, ilike, isNull, or, sql } from "drizzle-orm";
 import { getDb } from "@/lib/db";
+import { SETTINGS } from "@/lib/config";
 import { bans, users } from "@/lib/schema";
 import { destroyAdminSession, isAdmin } from "@/lib/adminAuth";
 
 export const dynamic = "force-dynamic";
 
+const PAGE_SIZE = SETTINGS.adminPageSize;
+
+// در ilike کاراکترهای % و _ و \ معنی خاص دارند
+const escapeLike = (s: string) => s.replace(/[\\%_]/g, "\\$&");
+
 export default async function AdminPage({
   searchParams,
 }: {
-  searchParams?: Promise<{ q?: string }>;
+  searchParams?: Promise<{ q?: string; page?: string }>;
 }) {
   if (!(await isAdmin())) redirect("/admin/login");
 
-  const q = ((await searchParams) ?? {}).q?.trim() ?? "";
+  const sp = (await searchParams) ?? {};
+  const q = sp.q?.trim() ?? "";
+  const page = Math.min(100_000, Math.max(1, Math.floor(Number(sp.page)) || 1));
 
   async function setBan(formData: FormData) {
     "use server";
@@ -23,16 +31,30 @@ export default async function AdminPage({
     const ban = formData.get("ban") === "1";
     if (!Number.isSafeInteger(id)) return;
 
-    const db = getDb();
-    await db.update(users).set({ isBanned: ban }).where(eq(users.telegramId, id));
-    if (ban) {
-      await db.insert(bans).values({ userId: id, reason: "manual" });
-    } else {
-      await db
-        .update(bans)
-        .set({ unbannedAt: new Date() })
-        .where(and(eq(bans.userId, id), isNull(bans.unbannedAt)));
-    }
+    // هر دو مرحله در یک تراکنش، تا وضعیت users و bans ناسازگار نشود
+    await getDb().transaction(async (tx) => {
+      const updated = await tx
+        .update(users)
+        .set({ isBanned: ban })
+        .where(eq(users.telegramId, id))
+        .returning({ id: users.telegramId });
+      if (updated.length === 0) return;
+
+      const [open] = await tx
+        .select({ id: bans.id })
+        .from(bans)
+        .where(and(eq(bans.userId, id), isNull(bans.unbannedAt)))
+        .limit(1);
+
+      if (ban) {
+        if (!open) await tx.insert(bans).values({ userId: id, reason: "manual" });
+      } else {
+        await tx
+          .update(bans)
+          .set({ unbannedAt: new Date() })
+          .where(and(eq(bans.userId, id), isNull(bans.unbannedAt)));
+      }
+    });
     revalidatePath("/admin");
   }
 
@@ -64,6 +86,7 @@ export default async function AdminPage({
 
   let stats: { total: number; active: number; banned: number } | null = null;
   let rows: (typeof users.$inferSelect)[] = [];
+  let matched = 0;
 
   try {
     const db = getDb();
@@ -75,23 +98,36 @@ export default async function AdminPage({
     const [b] = await db.select({ v: count() }).from(users).where(eq(users.isBanned, true));
     stats = { total: t.v, active: a.v, banned: b.v };
 
-    const asId = Number(q);
+    const term = q.replace(/^@/, "");
+    const asId = Number(term);
+    const where = term
+      ? or(
+          ilike(users.username, `%${escapeLike(term)}%`),
+          Number.isSafeInteger(asId) ? eq(users.telegramId, asId) : undefined
+        )
+      : undefined;
+
+    const [m] = await db.select({ v: count() }).from(users).where(where);
+    matched = m.v;
+
     rows = await db
       .select()
       .from(users)
-      .where(
-        q
-          ? or(
-              ilike(users.username, `%${q}%`),
-              Number.isSafeInteger(asId) ? eq(users.telegramId, asId) : undefined
-            )
-          : undefined
-      )
+      .where(where)
       .orderBy(desc(users.lastSeenAt))
-      .limit(50);
+      .limit(PAGE_SIZE)
+      .offset((page - 1) * PAGE_SIZE);
   } catch (e) {
     console.error("Admin DB error:", e);
   }
+
+  const totalPages = Math.max(1, Math.ceil(matched / PAGE_SIZE));
+  const pageHref = (p: number) => {
+    const params = new URLSearchParams();
+    if (q) params.set("q", q);
+    params.set("page", String(p));
+    return `/admin?${params.toString()}`;
+  };
 
   return (
     <main>
@@ -153,6 +189,15 @@ export default async function AdminPage({
           ))}
         </tbody>
       </table>
+
+      <p style={{ marginTop: 16 }}>
+        {page > 1 ? <a href={pageHref(page - 1)}>« قبلی</a> : null}
+        {page > 1 && page < totalPages ? " | " : null}
+        <span style={{ margin: "0 12px" }}>
+          صفحه {page} از {totalPages} ({matched} کاربر)
+        </span>
+        {page < totalPages ? <a href={pageHref(page + 1)}>بعدی »</a> : null}
+      </p>
     </main>
   );
 }

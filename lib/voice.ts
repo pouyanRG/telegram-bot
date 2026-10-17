@@ -118,16 +118,23 @@ export async function handleVoice(ctx: Context) {
       throw new UserError("⚠️ پردازش طولانی شد و لغو شد. توکن برگردانده شد؛ دوباره بفرست.");
     }
 
-    // متن ساده، بدون parse_mode: خروجی مدل را قابل‌اعتماد فرض نمی‌کنیم
-    for (const part of chunk(text)) {
-      await ctx.reply(part, {
-        reply_parameters: { message_id: msg.message_id },
-        link_preview_options: { is_disabled: true },
-      });
+    // ۸) ارسال نتیجه. از اینجا به بعد job در وضعیت done است و failJob اثری ندارد،
+    // پس خطای ارسال نباید به کاربر بگوید «توکن برگردانده شد».
+    try {
+      // متن ساده، بدون parse_mode: خروجی مدل را قابل‌اعتماد فرض نمی‌کنیم
+      for (const part of chunk(text)) {
+        await ctx.reply(part, {
+          reply_parameters: { message_id: msg.message_id },
+          link_preview_options: { is_disabled: true },
+        });
+      }
+      await ctx.reply(
+        `🎙 ${billedSec} ثانیه • ${tier.cost} توکن • باقی‌مانده امروز: ${Math.max(limit - charge.used, 0)}`
+      );
+    } catch (sendErr) {
+      console.error("voice send error:", sendErr instanceof Error ? sendErr.message : "unknown");
+      await reply("⚠️ متن آماده شد ولی ارسالش ناموفق بود. توکن این ویس کسر شده است.").catch(() => {});
     }
-    await ctx.reply(
-      `🎙 ${billedSec} ثانیه • ${tier.cost} توکن • باقی‌مانده امروز: ${Math.max(limit - charge.used, 0)}`
-    );
   } catch (e) {
     await failJob(job.id).catch((err) => console.error("failJob error:", err));
     if (e instanceof UserError) {

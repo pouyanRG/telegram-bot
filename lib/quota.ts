@@ -1,4 +1,4 @@
-import { lt, sql } from "drizzle-orm";
+import { and, eq, lt, sql } from "drizzle-orm";
 import { getDb } from "./db";
 import { quotas } from "./schema";
 import { LIMITS, type Feature } from "./config";
@@ -21,4 +21,14 @@ export async function consumeQuota(userId: number, feature: Feature) {
     .returning({ used: quotas.used });
 
   return { allowed: rows.length > 0, used: rows[0]?.used ?? limit, limit };
+}
+
+/** برگرداندن یک واحد سهمیه (مثلاً وقتی ارز پیدا نشد یا API خطا داد) */
+export async function refundQuota(userId: number, feature: Feature) {
+  await getDb()
+    .update(quotas)
+    .set({ used: sql`greatest(${quotas.used} - 1, 0)` })
+    .where(
+      and(eq(quotas.userId, userId), eq(quotas.feature, feature), eq(quotas.day, today()))
+    );
 }

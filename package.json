@@ -7,8 +7,10 @@
     "build": "next build",
     "start": "next start",
     "db:push": "node --env-file=.env.local ./node_modules/drizzle-kit/bin.cjs push",
-    "webhook:set": "cross-env HTTP_PROXY=http://127.0.0.1:10808 HTTPS_PROXY=http://127.0.0.1:10808 NO_PROXY= node --use-env-proxy --env-file=.env.local scripts/set-webhook.mjs",
-    "commands:set": "cross-env HTTP_PROXY=http://127.0.0.1:10808 HTTPS_PROXY=http://127.0.0.1:10808 NO_PROXY= node --use-env-proxy --env-file=.env.local scripts/set-commands.mjs"
+    "webhook:set": "node --env-file=.env.local scripts/set-webhook.mjs",
+    "webhook:set:proxy": "cross-env HTTP_PROXY=http://127.0.0.1:10808 HTTPS_PROXY=http://127.0.0.1:10808 NO_PROXY= node --use-env-proxy --env-file=.env.local scripts/set-webhook.mjs",
+    "commands:set": "node --env-file=.env.local scripts/set-commands.mjs",
+    "commands:set:proxy": "cross-env HTTP_PROXY=http://127.0.0.1:10808 HTTPS_PROXY=http://127.0.0.1:10808 NO_PROXY= node --use-env-proxy --env-file=.env.local scripts/set-commands.mjs"
   },
   "dependencies": {
     "drizzle-orm": "^0.36.0",
