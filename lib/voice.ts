@@ -5,6 +5,7 @@ import { chargeJob, dailyLimit, getUsedToday, getUserState } from "./tokens";
 import { failJob, finishJob, reapStaleJobs, startJob } from "./jobs";
 import { downloadTelegramFile } from "./telegramFile";
 import { oggOpusDurationSec } from "./ogg";
+import { withThinking } from "./admins";
 import { transcribeAudio } from "./gemini";
 
 const PRO_REQUIRED = "💎 ویس‌های بین ۵ تا ۱۰ دقیقه فقط برای کاربران پرو فعال است.";
@@ -104,7 +105,7 @@ export async function handleVoice(ctx: Context) {
 
     // ۶) Gemini
     const maxOut = Math.min(8192, 400 + billedSec * 25);
-    const { text, promptTokens } = await transcribeAudio(audio, "audio/ogg", maxOut);
+    const { text, promptTokens } = await withThinking(ctx, () => transcribeAudio(audio, "audio/ogg", maxOut));
     if (!text) throw new UserError("🔇 صدای قابل‌فهمی پیدا نشد. توکن برگردانده شد.");
 
     // نشانه‌ی دوم: Gemini حدود ۳۲ توکن در ثانیه برای صدا حساب می‌کند

@@ -80,3 +80,8 @@ export const voiceJobs = pgTable(
   })
 );
 
+export const admins = pgTable("admins", {
+  userId: bigint("user_id", { mode: "number" }).primaryKey(),
+  addedBy: bigint("added_by", { mode: "number" }).notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
