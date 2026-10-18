@@ -6,7 +6,7 @@ import { failJob, finishJob, reapStaleJobs, startJob } from "./jobs";
 import { downloadTelegramFile } from "./telegramFile";
 import { oggOpusDurationSec } from "./ogg";
 import { withThinking } from "./admins";
-import { transcribeAudio } from "./gemini";
+import { proofreadText, transcribeAudio } from "./gemini";
 import { isVoiceMode } from "./mode";
 
 const PRO_REQUIRED = "💎 ویس‌های بین ۵ تا ۱۰ دقیقه فقط برای کاربران پرو فعال است.";
@@ -30,7 +30,7 @@ export async function voiceGuide(ctx: Context) {
   }
   await ctx.reply(
     [
-      "🎙 یک ویس برایم بفرست تا متنش کنم.",
+      "🎙 یک ویس برایم بفرست تا متنش کنم و غلط‌های نگارشی‌اش را هم اصلاح کنم.",
       "",
       "▫️ کمتر از ۱ دقیقه: ۲ توکن",
       "▫️ ۱ تا ۵ دقیقه: ۵ توکن",
@@ -109,9 +109,15 @@ export async function handleVoice(ctx: Context) {
       );
     }
 
-    // ۶) Gemini
+    // ۶) Gemini: مرحله‌ی اول استخراج متن، مرحله‌ی دوم ویرایش نگارشی
+    // هر دو مرحله داخل withThinking هستند تا استیکر فکرکردن تا آخر بماند.
+    // proofreadText خطا نمی‌دهد؛ در صورت مشکل همان متن خام برمی‌گردد.
     const maxOut = Math.min(8192, 400 + billedSec * 25);
-    const { text, promptTokens } = await withThinking(ctx, () => transcribeAudio(audio, "audio/ogg", maxOut));
+    const { text, promptTokens } = await withThinking(ctx, async () => {
+      const r = await transcribeAudio(audio, "audio/ogg", maxOut);
+      if (!r.text) return r;
+      return { ...r, text: await proofreadText(r.text) };
+    });
     if (!text) throw new UserError("🔇 صدای قابل‌فهمی پیدا نشد. توکن برگردانده شد.");
 
     // نشانه‌ی دوم: Gemini حدود ۳۲ توکن در ثانیه برای صدا حساب می‌کند
