@@ -1,4 +1,6 @@
+import { UserError } from "./errors";
 import { Bot, GrammyError, InlineKeyboard, type Context } from "grammy";
+
 import {
   addAdmin,
   isAdminUser,
@@ -10,7 +12,10 @@ import {
   setPendingSticker,
   setThinkingSticker,
   takePendingSticker,
+  withThinking,
 } from "./admins";
+
+
 import { SETTINGS, quotaExceededMessage } from "./config";
 import { consumeQuota, refundQuota } from "./quota";
 import { getPrices, formatPrices, findCoin, formatCoin } from "./prices";
@@ -18,6 +23,8 @@ import { dedupeUpdates, userGuard } from "./middleware";
 import { mainMenu } from "./menu";
 import { handleVoice, voiceGuide } from "./voice";
 import { clearMode, setVoiceMode } from "./mode";
+import { NEWS_CATEGORIES, NEWS_CATEGORY_IDS, WINDOWS, type WindowId } from "./news/categories";
+import { getNews, formatNews } from "./news";
 
 let _bot: Bot | null = null;
 
@@ -92,8 +99,38 @@ const pricesKb = new InlineKeyboard()
   .text("🔄 بروزرسانی", "prices:refresh")
   .row()
   .text("🏠 منوی اصلی", "menu:home");
-
 const cancelStickerKb = new InlineKeyboard().text("❌ انصراف", "admin:sticker_cancel");
+
+const newsCatKb = () => {
+  const kb = new InlineKeyboard();
+  for (const id of NEWS_CATEGORY_IDS) {
+    kb.text(`${NEWS_CATEGORIES[id].emoji} ${NEWS_CATEGORIES[id].label}`, `news:cat:${id}`).row();
+  }
+  return kb.text("🏠 منوی اصلی", "menu:home");
+};
+
+const newsWinKb = (cat: string) =>
+  new InlineKeyboard()
+    .text(WINDOWS["1"].label, `news:win:${cat}:1`)
+    .text(WINDOWS["3"].label, `news:win:${cat}:3`)
+    .text(WINDOWS["24"].label, `news:win:${cat}:24`)
+    .row()
+    .text("⬅️ بازگشت", "menu:news");
+
+const newsGoKb = (cat: string, win: string) =>
+  new InlineKeyboard()
+    .text("🔎 شروع جستجو", `news:go:${cat}:${win}`)
+    .row()
+    .text("⬅️ بازگشت", `news:cat:${cat}`);
+
+const newsResultKb = (cat: string, win: string) =>
+  new InlineKeyboard()
+    .text("🔄 بروزرسانی", `news:go:${cat}:${win}`)
+    .row()
+    .text("📰 دسته‌ها", "menu:news")
+    .text("🏠 منو", "menu:home");
+
+const isWin = (w: string): w is WindowId => w in WINDOWS;
 
 const backToSettingsKb = new InlineKeyboard().text("🔙 برگشت", "menu:settings");
 
@@ -383,6 +420,70 @@ export function getBot() {
   bot.callbackQuery(/^menu:/, async (ctx) => {
     await resetState(ctx);
     await ctx.answerCallbackQuery({ text: "این بخش به‌زودی فعال می‌شود 🚧" });
+  });
+
+    // ================= خبر شخصی =================
+
+  bot.callbackQuery("menu:news", async (ctx) => {
+    await ctx.answerCallbackQuery();
+    await editOrReply(ctx, "📰 <b>خبر شخصی</b>\nموضوع را انتخاب کن:", newsCatKb());
+  });
+
+  bot.callbackQuery(/^news:cat:(\w+)$/, async (ctx) => {
+    await ctx.answerCallbackQuery();
+    const cat = NEWS_CATEGORIES[ctx.match[1]];
+    if (!cat) return;
+    await editOrReply(ctx, `${cat.emoji} <b>${cat.label}</b>\nبازه‌ی زمانی را انتخاب کن:`, newsWinKb(cat.id));
+  });
+
+  bot.callbackQuery(/^news:win:(\w+):(\w+)$/, async (ctx) => {
+    await ctx.answerCallbackQuery();
+    const [, catId, win] = ctx.match;
+    const cat = NEWS_CATEGORIES[catId];
+    if (!cat || !isWin(win)) return;
+    await editOrReply(
+      ctx,
+      `${cat.emoji} <b>${cat.label}</b> — ${WINDOWS[win].label}\nبرای شروع جستجو دکمه‌ی زیر را بزن.`,
+      newsGoKb(cat.id, win)
+    );
+  });
+
+  bot.callbackQuery(/^news:go:(\w+):(\w+)$/, async (ctx) => {
+    const [, catId, win] = ctx.match;
+    const cat = NEWS_CATEGORIES[catId];
+    if (!cat || !isWin(win)) return void (await ctx.answerCallbackQuery());
+
+    // سهمیه‌ی روزانه (ادمین‌ها معاف)
+    const uid = ctx.from.id;
+    let consumed = false;
+    if (!(await isAdminUser(uid))) {
+      const q = await consumeQuota(uid, "news");
+      if (!q.allowed) {
+        await ctx.answerCallbackQuery();
+        return void (await ctx.reply(quotaExceededMessage("news"), HTML));
+      }
+      consumed = true;
+    }
+    const refund = async () => {
+      if (consumed) await refundQuota(uid, "news").catch((e) => console.error("refund error:", e));
+    };
+
+    await ctx.answerCallbackQuery({ text: "در حال جستجو…" });
+    await ctx.replyWithChatAction("typing");
+
+    try {
+      const r = await withThinking(ctx, () => getNews(cat.id, win));
+      let text = formatNews(cat.id, win, r, r.updatedAt);
+      if (text.length > 4000) text = text.slice(0, 3990).replace(/\n[^\n]*$/, "") + "\n…";
+      await ctx.reply(text, { ...HTML, ...NO_PREVIEW, reply_markup: newsResultKb(cat.id, win) });
+      // نتیجه‌ی خالی هم سهمیه را مصرف نمی‌کند
+      if (r.items.length === 0) await refund();
+    } catch (e) {
+      await refund();
+      if (e instanceof UserError) return void (await ctx.reply(e.message));
+      console.error("news error:", e instanceof Error ? e.message : "unknown");
+      await ctx.reply("⚠️ الان نمی‌توانم خبرها را بگیرم. کمی بعد دوباره امتحان کن.");
+    }
   });
 
   // ================= جستجوی ارز =================
