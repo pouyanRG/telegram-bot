@@ -416,8 +416,7 @@ export function getBot() {
   );
 
   // ================= بخش‌های در دست ساخت =================
-
-  bot.callbackQuery(/^menu:/, async (ctx) => {
+  bot.callbackQuery(/^menu:(?!news$)/, async (ctx) => {
     await resetState(ctx);
     await ctx.answerCallbackQuery({ text: "این بخش به‌زودی فعال می‌شود 🚧" });
   });
