@@ -15,14 +15,14 @@ import {
   withThinking,
 } from "./admins";
 
-
 import { SETTINGS, quotaExceededMessage } from "./config";
 import { consumeQuota, refundQuota } from "./quota";
 import { getPrices, formatPrices, findCoin, formatCoin } from "./prices";
 import { dedupeUpdates, userGuard } from "./middleware";
-import { mainMenu } from "./menu";
+import { mainMenu, BTN, idleKb, waitingKb, chatKb } from "./menu";
 import { handleVoice, voiceGuide } from "./voice";
 import { clearMode, setVoiceMode } from "./mode";
+import { joinQueue, leaveChat, getAnon } from "./anon";
 import { NEWS_CATEGORIES, NEWS_CATEGORY_IDS, WINDOWS, type WindowId } from "./news/categories";
 import { getNews, formatNews } from "./news";
 
@@ -41,6 +41,8 @@ const HELP_USER = [
   "▫️ /prices — وضعیت بازار و قیمت‌ها",
   "▫️ نام یا نماد هر ارز (مثل <code>btc</code> یا <code>solana</code> یا <code>بیت‌کوین</code>) را بفرست تا قیمتش را ببینی",
   "▫️ برای تبدیل ویس به متن، از منو «🎙 ویس به متن» را بزن و بعد ویس بفرست",
+  "▫️ «🎭 به یه ناشناس وصلم کن!» — چت ناشناس با یک نفر دیگر",
+  "▫️ /end — پایان چت ناشناس",
   "",
   "<i>ربات در حال توسعه است و بخش‌ها به‌تدریج فعال می‌شوند.</i>",
 ].join("\n");
@@ -49,6 +51,7 @@ const HELP_ADMIN = [
   "",
   "🛠 <b>بخش ادمین</b>",
   "▫️ منو ← «⚙️ Setting» — تنظیمات ادمین (مثل استیکر فکرکردن)",
+  "▫️ بخش «📰 خبر شخصی» فقط برای ادمین‌ها فعال است",
 ].join("\n");
 
 const HELP_OWNER = [
@@ -56,6 +59,9 @@ const HELP_OWNER = [
   "▫️ /removeadmin <code>آیدی</code> — حذف ادمین فرعی",
   "▫️ /admins — فهرست ادمین‌ها",
 ].join("\n");
+
+const ANON_MATCHED =
+  "✅ وصل شدی! سلام کن 👋\nهرچی بفرستی (متن، عکس، ویس، استیکر، ...) ناشناس برای طرف مقابل می‌رسد.";
 
 const HTML = { parse_mode: "HTML" as const };
 const NO_PREVIEW = { link_preview_options: { is_disabled: true } };
@@ -91,7 +97,7 @@ function normalizeFa(s: string) {
     .replace(/[\u200c\s]+/g, "");
 }
 
-// ---------- کیبوردها ----------
+// ---------- کیبوردهای داخل پیام ----------
 
 const homeKb = new InlineKeyboard().text("🏠 منوی اصلی", "menu:home");
 
@@ -169,7 +175,7 @@ function parseId(raw: unknown) {
   return Number.isSafeInteger(n) && n > 0 ? n : null;
 }
 
-/** منوی اصلی؛ برای ادمین‌ها دکمه‌ی Setting هم دارد */
+/** منوی اصلی؛ برای ادمین‌ها دکمه‌ی خبر و Setting هم دارد */
 async function menuFor(ctx: Context) {
   const uid = ctx.from?.id;
   return mainMenu(!!uid && (await isAdminUser(uid)));
@@ -202,6 +208,65 @@ async function sendPrices(ctx: Context) {
   }
 }
 
+// ---------- منوی اصلی و کیبورد ثابت پایین ----------
+
+async function showHome(ctx: Context) {
+  await resetState(ctx);
+  await ctx.reply(WELCOME, { ...HTML, reply_markup: await menuFor(ctx) });
+
+  // کیبورد پایین متناسب با وضعیت چت ناشناس کاربر
+  const a = ctx.from ? await getAnon(ctx.from.id).catch(() => null) : null;
+  const kb = a?.state === "chatting" ? chatKb : a?.state === "waiting" ? waitingKb : idleKb;
+  await ctx.reply("👇 از دکمه‌های پایین هم می‌توانی استفاده کنی.", { reply_markup: kb });
+}
+
+// ---------- چت ناشناس ----------
+
+async function startAnon(ctx: Context) {
+  const uid = ctx.from!.id;
+  await resetState(ctx); // ویس به متن / انتظار استیکر غیرفعال شود
+
+  const r = await joinQueue(uid);
+
+  if (r.status === "chatting") {
+    return void (await ctx.reply("الان وسط چت هستی. برای پایان «🛑 پایان چت» را بزن.", {
+      reply_markup: chatKb,
+    }));
+  }
+  if (r.status === "waiting") {
+    return void (await ctx.reply("🔎 دنبال یک نفر می‌گردم؛ تا پیدا شدن صبر کن...", {
+      reply_markup: waitingKb,
+    }));
+  }
+
+  // وصل شد: اول به طرف مقابل خبر بده؛ اگر ربات را بلاک کرده بود اتصال لغو می‌شود
+  try {
+    await ctx.api.sendMessage(r.partnerId, ANON_MATCHED, { reply_markup: chatKb });
+  } catch {
+    await leaveChat(uid);
+    return void (await ctx.reply("😕 طرف مقابل در دسترس نبود. دوباره امتحان کن.", {
+      reply_markup: idleKb,
+    }));
+  }
+  await ctx.reply(ANON_MATCHED, { reply_markup: chatKb });
+}
+
+async function endAnon(ctx: Context) {
+  const r = await leaveChat(ctx.from!.id);
+  if (r.was === "chatting") {
+    await ctx.reply("🛑 چت تمام شد.", { reply_markup: idleKb });
+    if (r.partnerId) {
+      await ctx.api
+        .sendMessage(r.partnerId, "🛑 طرف مقابل چت را ترک کرد.", { reply_markup: idleKb })
+        .catch(() => {});
+    }
+  } else if (r.was === "waiting") {
+    await ctx.reply("جستجو لغو شد.", { reply_markup: idleKb });
+  } else {
+    await ctx.reply("الان چت فعالی نداری.", { reply_markup: idleKb });
+  }
+}
+
 // ---------- ساخت ربات ----------
 
 export function getBot() {
@@ -216,18 +281,19 @@ export function getBot() {
   bot.use(dedupeUpdates);
   bot.use(userGuard);
 
+  // ================= خبر: فقط ادمین =================
+  // قبل از همه‌ی handlerهای خبر می‌آید؛ برای غیرادمین جلوی ادامه را می‌گیرد
+  bot.callbackQuery(/^(menu:news|news:)/, async (ctx, next) => {
+    if (await isAdminUser(ctx.from.id)) return next();
+    await ctx.answerCallbackQuery({
+      text: "📰 این بخش فعلاً فقط برای ادمین‌هاست.",
+      show_alert: true,
+    });
+  });
+
   // ================= دستورهای عمومی =================
 
-  bot.command(["start", "menu"], async (ctx) => {
-    await resetState(ctx);
-    await ctx.reply(WELCOME, { ...HTML, reply_markup: await menuFor(ctx) });
-
-    // پاک‌کردن کیبورد ثابت قدیمی ادمین‌ها (بعد از مدتی می‌توانی این بلوک را حذف کنی)
-    if (ctx.from && (await isAdminUser(ctx.from.id))) {
-      const tmp = await ctx.reply("⚙️", { reply_markup: { remove_keyboard: true } }).catch(() => null);
-      if (tmp && ctx.chat) await ctx.api.deleteMessage(ctx.chat.id, tmp.message_id).catch(() => {});
-    }
-  });
+  bot.command(["start", "menu"], showHome);
 
   bot.command("help", async (ctx) => {
     await resetState(ctx);
@@ -241,6 +307,45 @@ export function getBot() {
   bot.command("prices", async (ctx) => {
     await resetState(ctx);
     await sendPrices(ctx);
+  });
+
+  // ================= چت ناشناس =================
+
+  // دکمه‌های کیبورد ثابت پایین
+  bot.hears(BTN.connect, startAnon);
+  bot.hears([BTN.cancel, BTN.end], endAnon);
+  bot.command("end", endAnon);
+  bot.hears(BTN.next, async (ctx) => {
+    await endAnon(ctx);
+    await startAnon(ctx);
+  });
+  bot.hears(BTN.menu, showHome);
+  bot.hears(BTN.help, async (ctx) => {
+    await resetState(ctx);
+    await ctx.reply(HELP_USER, { ...HTML, reply_markup: homeKb });
+  });
+
+  // رد و بدل پیام بین دو نفر (متن، عکس، ویس، استیکر، ...).
+  // باید قبل از handlerهای ویس/استیکر/متن بیاید.
+  // copyMessage فرستنده را نشان نمی‌دهد (پیام «فوروارد‌شده» نیست).
+  bot.on("message", async (ctx, next) => {
+    if (ctx.message.text?.startsWith("/")) return next();
+
+    const a = await getAnon(ctx.from.id);
+    if (a?.state !== "chatting" || !a.partnerId) return next();
+
+    try {
+      await ctx.api.copyMessage(a.partnerId, ctx.chat.id, ctx.message.message_id);
+    } catch (e) {
+      if (e instanceof GrammyError && e.error_code === 403) {
+        // طرف مقابل ربات را بلاک کرده
+        await leaveChat(ctx.from.id);
+        await ctx.reply("🛑 طرف مقابل در دسترس نیست؛ چت تمام شد.", { reply_markup: idleKb });
+      } else {
+        console.error("anon relay error:", e instanceof Error ? e.message : "unknown");
+        await ctx.reply("⚠️ پیام ارسال نشد. دوباره بفرست.");
+      }
+    }
   });
 
   // ================= بخش ادمین =================
@@ -416,12 +521,13 @@ export function getBot() {
   );
 
   // ================= بخش‌های در دست ساخت =================
+  // menu:news عمداً مستثنی است (handler خودش پایین‌تر است)
   bot.callbackQuery(/^menu:(?!news$)/, async (ctx) => {
     await resetState(ctx);
     await ctx.answerCallbackQuery({ text: "این بخش به‌زودی فعال می‌شود 🚧" });
   });
 
-    // ================= خبر شخصی =================
+  // ================= خبر شخصی (فقط ادمین؛ گارد بالا) =================
 
   bot.callbackQuery("menu:news", async (ctx) => {
     await ctx.answerCallbackQuery();
@@ -452,7 +558,7 @@ export function getBot() {
     const cat = NEWS_CATEGORIES[catId];
     if (!cat || !isWin(win)) return void (await ctx.answerCallbackQuery());
 
-    // سهمیه‌ی روزانه (ادمین‌ها معاف)
+    // سهمیه‌ی روزانه (ادمین‌ها معاف؛ چون این بخش فقط ادمین دارد، عملاً همیشه معاف است)
     const uid = ctx.from.id;
     let consumed = false;
     if (!(await isAdminUser(uid))) {

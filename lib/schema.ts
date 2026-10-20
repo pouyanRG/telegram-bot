@@ -106,3 +106,20 @@ export const processedUpdates = pgTable(
     byCreated: index("processed_updates_created_idx").on(t.createdAt),
   })
 );
+
+
+// وضعیت چت ناشناس هر کاربر: waiting (در صف) یا chatting (وصل به partnerId)
+export const anonState = pgTable(
+  "anon_state",
+  {
+    userId: bigint("user_id", { mode: "number" })
+      .primaryKey()
+      .references(() => users.telegramId, { onDelete: "cascade" }),
+    state: text("state").notNull(),
+    partnerId: bigint("partner_id", { mode: "number" }),
+    updatedAt: ts("updated_at").defaultNow().notNull(),
+  },
+  (t) => ({
+    byState: index("anon_state_state_idx").on(t.state, t.updatedAt),
+  })
+);
