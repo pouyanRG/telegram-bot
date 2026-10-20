@@ -32,6 +32,10 @@ let _bot: Bot | null = null;
 
 const WELCOME = "👋 <b>سلام!</b>\nیکی از بخش‌های زیر را انتخاب کن:";
 
+// پیام /start: فقط همین نشان داده می‌شود (همراه کیبورد ثابت پایین)
+const START_TEXT =
+  "خب ، حالا چه کاری برات انجام بدم؟\n<code>از منوی پایین👇 انتخاب کن</code>";
+
 const SETTINGS_TEXT = "⚙️ <b>Setting</b>\nیکی از گزینه‌ها را انتخاب کن:";
 
 const HELP_USER = [
@@ -62,6 +66,22 @@ const HELP_OWNER = [
 
 const ANON_MATCHED =
   "✅ وصل شدی! سلام کن 👋\nهرچی بفرستی (متن، عکس، ویس، استیکر، ...) ناشناس برای طرف مقابل می‌رسد.";
+
+// پنل انتخاب نوع جستجو (بعد از زدن «به یه ناشناس وصلم کن!»)
+const ANON_PICK_TEXT = [
+  "\u200F لطفا قبل از شروع چت قوانین ربات « /ghavanin » را مطالعه و رعایت کنید.",
+  "",
+  "<blockquote expandable>\u200F⚠️ توجه داشته باشید که در بخش جستجوی شانسی بدلیل درخواست‌های زیاد احتمال اتصال به کاربر خانم بشدت پایینه!</blockquote>",
+  "",
+  "\u200F🫧 به کی وصلت کنم؟ <code>انتخاب کن</code> 👇",
+].join("\n");
+
+const RULES_TEXT = [
+  "📜 <b>قوانین ربات</b>",
+  "",
+  "▫️ رعایت احترام الزامی است.",
+  "▫️ ارسال محتوای نامناسب ممنوع است.",
+].join("\n");
 
 const HTML = { parse_mode: "HTML" as const };
 const NO_PREVIEW = { link_preview_options: { is_disabled: true } };
@@ -106,6 +126,22 @@ const pricesKb = new InlineKeyboard()
   .row()
   .text("🏠 منوی اصلی", "menu:home");
 const cancelStickerKb = new InlineKeyboard().text("❌ انصراف", "admin:sticker_cancel");
+
+// ترتیب هر ردیف از چپ به راست است (چیدمان تلگرام)
+const anonSearchKb = {
+  inline_keyboard: [
+    [{ text: "🎲 جستجوی شانسی", callback_data: "anon:random", style: "primary" }],
+    [
+      { text: "👦 جستجوی پسر", callback_data: "anon:boy" },
+      { text: "👧 جستجوی دختر", callback_data: "anon:girl" },
+    ],
+    [{ text: "📍 جستجوی اطراف", callback_data: "anon:nearby", style: "danger" }],
+    [
+      { text: "🎎 جستجوی هم استانی", callback_data: "anon:province" },
+      { text: "👥 جستجوی هم سنی", callback_data: "anon:age" },
+    ],
+  ],
+};
 
 const newsCatKb = () => {
   const kb = new InlineKeyboard();
@@ -208,20 +244,57 @@ async function sendPrices(ctx: Context) {
   }
 }
 
-// ---------- منوی اصلی و کیبورد ثابت پایین ----------
+// ---------- شروع، منوی اصلی و کیبورد ثابت پایین ----------
 
+/** کیبورد پایین متناسب با وضعیت چت ناشناس کاربر */
+async function bottomKeyboardFor(ctx: Context) {
+  const a = ctx.from ? await getAnon(ctx.from.id).catch(() => null) : null;
+  return a?.state === "chatting" ? chatKb : a?.state === "waiting" ? waitingKb : idleKb;
+}
+
+/** /start: فقط یک پیام کوتاه همراه کیبورد ثابت پایین */
+async function showStart(ctx: Context) {
+  await resetState(ctx);
+  await ctx.reply(START_TEXT, { ...HTML, reply_markup: await bottomKeyboardFor(ctx) });
+}
+
+/** /menu و دکمه‌ی «📋 منو»: منوی اینلاین اصلی */
 async function showHome(ctx: Context) {
   await resetState(ctx);
   await ctx.reply(WELCOME, { ...HTML, reply_markup: await menuFor(ctx) });
-
-  // کیبورد پایین متناسب با وضعیت چت ناشناس کاربر
-  const a = ctx.from ? await getAnon(ctx.from.id).catch(() => null) : null;
-  const kb = a?.state === "chatting" ? chatKb : a?.state === "waiting" ? waitingKb : idleKb;
-  await ctx.reply("👇 از دکمه‌های پایین هم می‌توانی استفاده کنی.", { reply_markup: kb });
+  await ctx.reply("👇 از دکمه‌های پایین هم می‌توانی استفاده کنی.", {
+    reply_markup: await bottomKeyboardFor(ctx),
+  });
 }
 
 // ---------- چت ناشناس ----------
 
+/** با زدن «به یه ناشناس وصلم کن!»: پنل انتخاب نوع جستجو */
+async function showAnonOptions(ctx: Context) {
+  await resetState(ctx);
+  const a = await getAnon(ctx.from!.id);
+
+  if (a?.state === "chatting") {
+    return void (await ctx.reply("الان وسط چت هستی. برای پایان «🛑 پایان چت» را بزن.", {
+      reply_markup: chatKb,
+    }));
+  }
+  if (a?.state === "waiting") {
+    return void (await ctx.reply("🔎 دنبال یک نفر می‌گردم؛ تا پیدا شدن صبر کن...", {
+      reply_markup: waitingKb,
+    }));
+  }
+
+  await ctx.reply(ANON_PICK_TEXT, {
+    ...HTML,
+    ...NO_PREVIEW,
+    // ریپلای روی پیام کاربر
+    reply_parameters: { message_id: ctx.message!.message_id },
+    reply_markup: anonSearchKb,
+  });
+}
+
+/** ورود به صف و اتصال (جستجوی شانسی) */
 async function startAnon(ctx: Context) {
   const uid = ctx.from!.id;
   await resetState(ctx); // ویس به متن / انتظار استیکر غیرفعال شود
@@ -293,7 +366,8 @@ export function getBot() {
 
   // ================= دستورهای عمومی =================
 
-  bot.command(["start", "menu"], showHome);
+  bot.command("start", showStart);
+  bot.command("menu", showHome);
 
   bot.command("help", async (ctx) => {
     await resetState(ctx);
@@ -309,10 +383,16 @@ export function getBot() {
     await sendPrices(ctx);
   });
 
-    // ================= چت ناشناس =================
+  // متن قوانین را خودت عوض کن
+  bot.command("ghavanin", async (ctx) => {
+    await resetState(ctx);
+    await ctx.reply(RULES_TEXT, HTML);
+  });
+
+  // ================= چت ناشناس =================
 
   // دکمه‌های کیبورد ثابت پایین
-  bot.hears(BTN.connect, startAnon);
+  bot.hears(BTN.connect, showAnonOptions);
   bot.hears([BTN.cancel, BTN.end], endAnon);
   bot.command("end", endAnon);
   bot.hears(BTN.next, async (ctx) => {
@@ -333,6 +413,18 @@ export function getBot() {
       await ctx.reply("این بخش به‌زودی فعال می‌شود 🚧");
     }
   );
+
+  // دکمه‌های اینلاین پنل جستجوی ناشناس
+  bot.callbackQuery("anon:random", async (ctx) => {
+    await ctx.answerCallbackQuery();
+    await ctx.deleteMessage().catch(() => {});
+    await startAnon(ctx); // همان منطق صف قبلی
+  });
+
+  // این‌ها به اطلاعات پروفایل (جنسیت، سن، استان، موقعیت) نیاز دارند
+  bot.callbackQuery(/^anon:(boy|girl|nearby|province|age)$/, async (ctx) => {
+    await ctx.answerCallbackQuery({ text: "این بخش به‌زودی فعال می‌شود 🚧" });
+  });
 
   // رد و بدل پیام بین دو نفر (متن، عکس، ویس، استیکر، ...).
   // باید قبل از handlerهای ویس/استیکر/متن بیاید.
