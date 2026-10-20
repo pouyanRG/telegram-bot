@@ -1,4 +1,5 @@
 import { UserError } from "../errors";
+import { geminiFetch } from "../geminiKeys";
 import { WINDOWS, type NewsCategory, type WindowId } from "./categories";
 
 export type NewsStatus = "confirmed" | "single" | "official_claim" | "disputed";
@@ -77,37 +78,26 @@ function parseItems(text: string): NewsItem[] {
 }
 
 export async function searchNews(cat: NewsCategory, win: WindowId, maxItems = 6) {
-  const key = process.env.GEMINI_API_KEY;
-  const model = process.env.GEMINI_MODEL;
-  if (!key || !model) throw new Error("GEMINI_API_KEY and GEMINI_MODEL must be set");
-
-  const res = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`,
+  const res = await geminiFetch(
+    process.env.GEMINI_MODEL,
     {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "x-goog-api-key": key },
-      body: JSON.stringify({
-        contents: [{ role: "user", parts: [{ text: buildPrompt(cat, win, maxItems) }] }],
-        tools: [{ google_search: {} }],
-        generationConfig: { temperature: 0.2, maxOutputTokens: 3000 },
-      }),
-      signal: AbortSignal.timeout(45_000),
-    }
+      contents: [{ role: "user", parts: [{ text: buildPrompt(cat, win, maxItems) }] }],
+      tools: [{ google_search: {} }],
+      generationConfig: { temperature: 0.2, maxOutputTokens: 3000 },
+    },
+    45_000
   );
-  
+
   if (res.status === 429) {
+    // بدنه‌ی کامل خطا را لاگ کن تا معلوم شود کدام سهمیه پر شده (quotaId)
     const body = await res.text().catch(() => "");
-    console.error("gemini news 429:", body.slice(0, 500));
+    console.error("gemini news 429 (all keys):", body.slice(0, 4000));
     throw new UserError(
       "⏳ سرویس خبر الان شلوغ است. چند دقیقه بعد دوباره امتحان کن. (سهمیه‌ات کسر نشد)"
     );
   }
-  if (!res.ok) {
-    const body = await res.text().catch(() => "");
-    console.error(`gemini news http ${res.status} model=${model}:`, body.slice(0, 400));
-    throw new Error(`gemini news http ${res.status}`);
-  }
-  
+  if (!res.ok) throw new Error(`gemini news http ${res.status}`);
+
   const json = await res.json();
   const cand = json?.candidates?.[0];
   const text = ((cand?.content?.parts ?? []) as { text?: string }[])
