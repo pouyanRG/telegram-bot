@@ -1,4 +1,5 @@
 import { UserError } from "./errors";
+import { geminiFetch } from "./geminiKeys";
 
 const SYSTEM = [
   "You are a speech-to-text engine. Transcribe the audio verbatim.",
@@ -17,23 +18,10 @@ const PROOFREAD_SYSTEM = [
   "Output only the corrected text, without tags, quotes or explanations.",
 ].join("\n");
 
-function geminiConfig() {
-  const key = process.env.GEMINI_API_KEY;
-  const model = process.env.GEMINI_MODEL;
-  if (!key || !model) throw new Error("GEMINI_API_KEY and GEMINI_MODEL must be set");
-  return {
-    key,
-    url: `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`,
-  };
-}
-
 export async function transcribeAudio(audio: Buffer, mimeType: string, maxOutputTokens: number) {
-  const { key, url } = geminiConfig();
-
-  const res = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", "x-goog-api-key": key },
-    body: JSON.stringify({
+  const res = await geminiFetch(
+    process.env.GEMINI_MODEL,
+    {
       systemInstruction: { parts: [{ text: SYSTEM }] },
       contents: [
         {
@@ -45,18 +33,13 @@ export async function transcribeAudio(audio: Buffer, mimeType: string, maxOutput
         },
       ],
       generationConfig: { temperature: 0, maxOutputTokens },
-    }),
-    signal: AbortSignal.timeout(35_000),
-  });
+    },
+    35_000
+  );
 
   if (res.status === 429) {
-    const body = await res.text().catch(() => "");
-    console.error("gemini news 429:", body.slice(0, 500));
-    throw new UserError(
-      "⏳ سرویس خبر الان شلوغ است. چند دقیقه بعد دوباره امتحان کن. (سهمیه‌ات کسر نشد)"
-    );
+    throw new UserError("⏳ سرویس الان شلوغ است. چند دقیقه بعد دوباره امتحان کن. (توکنی کسر نشد)");
   }
-  
   if (!res.ok) throw new Error(`gemini http ${res.status}`);
 
   const json = await res.json();
@@ -79,13 +62,11 @@ export async function transcribeAudio(audio: Buffer, mimeType: string, maxOutput
  */
 export async function proofreadText(original: string): Promise<string> {
   try {
-    const { key, url } = geminiConfig();
     const maxOutputTokens = Math.min(8192, original.length + 512);
 
-    const res = await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "x-goog-api-key": key },
-      body: JSON.stringify({
+    const res = await geminiFetch(
+      process.env.GEMINI_MODEL,
+      {
         systemInstruction: { parts: [{ text: PROOFREAD_SYSTEM }] },
         contents: [
           {
@@ -94,9 +75,9 @@ export async function proofreadText(original: string): Promise<string> {
           },
         ],
         generationConfig: { temperature: 0, maxOutputTokens },
-      }),
-      signal: AbortSignal.timeout(15_000),
-    });
+      },
+      15_000
+    );
     if (!res.ok) throw new Error(`gemini proofread http ${res.status}`);
 
     const json = await res.json();

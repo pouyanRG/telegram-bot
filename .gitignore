@@ -17,3 +17,5 @@ coverage
 .git-parent-backup/
 .git-project-backup/
 my-bot/
+.vercel
+.env*
