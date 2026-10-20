@@ -309,7 +309,7 @@ export function getBot() {
     await sendPrices(ctx);
   });
 
-  // ================= چت ناشناس =================
+    // ================= چت ناشناس =================
 
   // دکمه‌های کیبورد ثابت پایین
   bot.hears(BTN.connect, startAnon);
@@ -324,6 +324,15 @@ export function getBot() {
     await resetState(ctx);
     await ctx.reply(HELP_USER, { ...HTML, reply_markup: homeKb });
   });
+
+  // دکمه‌های جدید کیبورد پایین که هنوز بخشی پشتشان نیست
+  bot.hears(
+    [BTN.search, BTN.nearby, BTN.coins, BTN.profile, BTN.link, BTN.feedback],
+    async (ctx) => {
+      await resetState(ctx);
+      await ctx.reply("این بخش به‌زودی فعال می‌شود 🚧");
+    }
+  );
 
   // رد و بدل پیام بین دو نفر (متن، عکس، ویس، استیکر، ...).
   // باید قبل از handlerهای ویس/استیکر/متن بیاید.
