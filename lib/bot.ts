@@ -1,5 +1,6 @@
 import { UserError } from "./errors";
 import { Bot, GrammyError, InlineKeyboard, type Context } from "grammy";
+import type { InlineKeyboardMarkup } from "grammy/types";
 
 import {
   addAdmin,
@@ -148,7 +149,7 @@ const pricesKb = new InlineKeyboard()
 const cancelStickerKb = new InlineKeyboard().text("❌ انصراف", "admin:sticker_cancel");
 
 // ترتیب هر ردیف از چپ به راست است (چیدمان تلگرام)
-const anonSearchKb = {
+const anonSearchKb: InlineKeyboardMarkup = {
   inline_keyboard: [
     [{ text: "🎲 جستجوی شانسی", callback_data: "anon:random", style: "primary" }],
     [
