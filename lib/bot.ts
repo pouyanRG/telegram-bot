@@ -38,8 +38,8 @@ const HELP_USER = [
   "ℹ️ <b>راهنما</b>",
   "",
   "▫️ /menu — منوی اصلی",
-  "▫️ /prices — وضعیت بازار و قیمت‌ها",
-  "▫️ نام یا نماد هر ارز (مثل <code>btc</code> یا <code>solana</code> یا <code>بیت‌کوین</code>) را بفرست تا قیمتش را ببینی",
+  "▫️ /prices — وضعیت بازار و ‌ها",
+  "▫️ نام یا نماد هر ارز (مثل <code>btc</code> یا <code>solana</code> یا <code>بیت‌کوین</code>) را بفرست تا رمزارز را ببینی",
   "▫️ برای تبدیل ویس به متن، از منو «🎙 ویس به متن» را بزن و بعد ویس بفرست",
   "▫️ «🎭 به یه ناشناس وصلم کن!» — چت ناشناس با یک نفر دیگر",
   "▫️ /end — پایان چت ناشناس",
@@ -204,7 +204,7 @@ async function sendPrices(ctx: Context) {
     const { data, updatedAt } = await getPrices();
     await ctx.reply(formatPrices(data, updatedAt), { ...HTML, reply_markup: pricesKb });
   } catch {
-    await ctx.reply("⚠️ الان نمی‌توانم قیمت‌ها را بگیرم. کمی بعد دوباره امتحان کن.");
+    await ctx.reply("⚠️ الان نمی‌توانم اطلاعات را بگیرم. کمی بعد دوباره امتحان کن.");
   }
 }
 
@@ -500,7 +500,7 @@ export function getBot() {
     } catch (e) {
       if (!isNotModified(e)) console.error("prices:refresh error:", e);
       await ctx.answerCallbackQuery({
-        text: isNotModified(e) ? "قیمت جدیدی نیست" : "⚠️ خطا در دریافت قیمت",
+        text: isNotModified(e) ? "آپدیت جدیدی نیست" : "⚠️ خطا در دریافت اطلاعات",
       });
     }
   });
@@ -607,7 +607,7 @@ export function getBot() {
     } catch (e) {
       if (!isNotModified(e)) console.error("coin refresh error:", e);
       await ctx.answerCallbackQuery({
-        text: isNotModified(e) ? "قیمت جدیدی نیست" : "⚠️ خطا در دریافت قیمت",
+        text: isNotModified(e) ? "اپدیت جدیدی نیست" : "⚠️ خطا در دریافت اطلاعات",
       });
     }
   });

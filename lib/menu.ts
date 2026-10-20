@@ -10,7 +10,7 @@ export function mainMenu(isAdmin = false) {
 
   // خبر فقط برای ادمین‌ها
   if (isAdmin) kb.text("📰 خبر شخصی", "menu:news");
-  kb.text("💰 قیمت‌ها", "menu:prices").row().text("ℹ️ راهنما", "menu:help");
+  kb.text("💰 رمزارزها", "menu:prices").row().text("ℹ️ راهنما", "menu:help");
 
   if (isAdmin) kb.row().text("⚙️ Setting", "menu:settings");
   return kb;

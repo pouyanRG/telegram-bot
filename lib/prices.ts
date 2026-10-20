@@ -249,7 +249,7 @@ export function formatPrices(s: Snapshot, updatedAt?: Date) {
 
   out.push(
     "",
-    "<blockquote>برای دریافت قیمت و مشخصات و نمودار ارزهای دیجیتال، نام یا نماد آن را ارسال کنید</blockquote>"
+    "<blockquote>برای دریافت اطلاعات و مشخصات و نمودار ارزهای دیجیتال، نام یا نماد آن را ارسال کنید</blockquote>"
   );
   return out.join("\n");
 }
