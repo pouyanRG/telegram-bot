@@ -50,8 +50,13 @@ export async function transcribeAudio(audio: Buffer, mimeType: string, maxOutput
   });
 
   if (res.status === 429) {
-    throw new UserError("⏳ سرویس الان شلوغ است. چند دقیقه بعد دوباره امتحان کن. (توکنی کسر نشد)");
+    const body = await res.text().catch(() => "");
+    console.error("gemini news 429:", body.slice(0, 500));
+    throw new UserError(
+      "⏳ سرویس خبر الان شلوغ است. چند دقیقه بعد دوباره امتحان کن. (سهمیه‌ات کسر نشد)"
+    );
   }
+  
   if (!res.ok) throw new Error(`gemini http ${res.status}`);
 
   const json = await res.json();
