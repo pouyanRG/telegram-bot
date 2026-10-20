@@ -21,6 +21,10 @@ export const users = pgTable("users", {
   username: text("username"),
   firstName: text("first_name"),
   language: text("language"),
+  // پروفایل چت ناشناس
+  gender: text("gender"), // "m" | "f"
+  age: integer("age"), // 9..99
+  province: text("province"), // یکی از ۳۱ استان
   proUntil: ts("pro_until"),
   isBanned: boolean("is_banned").default(false).notNull(),
   createdAt: ts("created_at").defaultNow().notNull(),

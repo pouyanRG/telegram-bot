@@ -25,6 +25,26 @@ import { clearMode, setVoiceMode } from "./mode";
 import { joinQueue, leaveChat, getAnon } from "./anon";
 import { NEWS_CATEGORIES, NEWS_CATEGORY_IDS, WINDOWS, type WindowId } from "./news/categories";
 import { getNews, formatNews } from "./news";
+import {
+  AGE_TEXT,
+  BACK_TEXT,
+  GENDER_TEXT,
+  PROVINCE_TEXT,
+  ageKb,
+  provinceKb,
+  genderKb,
+  clearStep,
+  getProfile,
+  getStep,
+  isProvince,
+  missingStep,
+  parseAge,
+  saveAge,
+  saveGender,
+  saveProvince,
+  setStep,
+  type Gender,
+} from "./profile";
 
 let _bot: Bot | null = null;
 
@@ -32,7 +52,7 @@ let _bot: Bot | null = null;
 
 const WELCOME = "👋 <b>سلام!</b>\nیکی از بخش‌های زیر را انتخاب کن:";
 
-// پیام /start: فقط همین نشان داده می‌شود (همراه کیبورد ثابت پایین)
+// پیام /start برای کاربری که پروفایلش کامل است (همراه کیبورد ثابت پایین)
 const START_TEXT =
   "خب ، حالا چه کاری برات انجام بدم؟\n<code>از منوی پایین👇 انتخاب کن</code>";
 
@@ -217,13 +237,42 @@ async function menuFor(ctx: Context) {
   return mainMenu(!!uid && (await isAdminUser(uid)));
 }
 
-/** هر بار که کاربر در منو جابه‌جا می‌شود: ویس غیرفعال و حالت انتظار استیکر لغو می‌شود */
+/** هر بار که کاربر در منو جابه‌جا می‌شود: ویس غیرفعال، حالت انتظار استیکر و مرحله‌ی نیمه‌کاره‌ی پروفایل لغو می‌شود */
 async function resetState(ctx: Context) {
   const uid = ctx.from?.id;
   if (!uid) return;
-  await Promise.all([clearMode(uid), takePendingSticker(uid)]).catch((e) =>
+  await Promise.all([clearMode(uid), takePendingSticker(uid), clearStep(uid)]).catch((e) =>
     console.error("resetState error:", e)
   );
+}
+
+// ---------- تکمیل پروفایل (جنسیت ← سن ← استان) ----------
+
+/** پیام مرحله‌ی مورد نظر را می‌فرستد */
+async function askStep(ctx: Context, step: "gender" | "age" | "province", replyTo?: number) {
+  const uid = ctx.from!.id;
+  if (step === "gender") {
+    await clearStep(uid);
+    await ctx.reply(GENDER_TEXT, {
+      reply_markup: genderKb,
+      ...(replyTo ? { reply_parameters: { message_id: replyTo } } : {}),
+    });
+  } else if (step === "age") {
+    await setStep(uid, "age");
+    await ctx.reply(AGE_TEXT, { ...HTML, reply_markup: ageKb() });
+  } else {
+    await setStep(uid, "province");
+    await ctx.reply(PROVINCE_TEXT, { reply_markup: provinceKb() });
+  }
+}
+
+/** اگر پروفایل کامل است true؛ وگرنه از اولین مرحله‌ی ناقص ادامه می‌دهد و false برمی‌گرداند */
+async function ensureProfile(ctx: Context, notice = false) {
+  const step = missingStep(await getProfile(ctx.from!.id));
+  if (!step) return true;
+  if (notice) await ctx.reply("⚠️ برای وصل شدن به ناشناس، اول باید پروفایلت را کامل کنی.");
+  await askStep(ctx, step, ctx.message?.message_id);
+  return false;
 }
 
 /** برای دکمه‌های مخصوص ادمین */
@@ -252,9 +301,10 @@ async function bottomKeyboardFor(ctx: Context) {
   return a?.state === "chatting" ? chatKb : a?.state === "waiting" ? waitingKb : idleKb;
 }
 
-/** /start: فقط یک پیام کوتاه همراه کیبورد ثابت پایین */
+/** /start: اگر پروفایل ناقص باشد جریان پروفایل شروع می‌شود؛ وگرنه یک پیام کوتاه همراه کیبورد ثابت پایین */
 async function showStart(ctx: Context) {
   await resetState(ctx);
+  if (!(await ensureProfile(ctx))) return;
   await ctx.reply(START_TEXT, { ...HTML, reply_markup: await bottomKeyboardFor(ctx) });
 }
 
@@ -285,6 +335,9 @@ async function showAnonOptions(ctx: Context) {
     }));
   }
 
+  // بدون پروفایل کامل اجازه‌ی چت ناشناس نیست
+  if (!(await ensureProfile(ctx, true))) return;
+
   await ctx.reply(ANON_PICK_TEXT, {
     ...HTML,
     ...NO_PREVIEW,
@@ -298,6 +351,9 @@ async function showAnonOptions(ctx: Context) {
 async function startAnon(ctx: Context) {
   const uid = ctx.from!.id;
   await resetState(ctx); // ویس به متن / انتظار استیکر غیرفعال شود
+
+  // بدون پروفایل کامل اجازه‌ی چت ناشناس نیست
+  if (!(await ensureProfile(ctx, true))) return;
 
   const r = await joinQueue(uid);
 
@@ -447,6 +503,47 @@ export function getBot() {
         await ctx.reply("⚠️ پیام ارسال نشد. دوباره بفرست.");
       }
     }
+  });
+
+  // ================= تکمیل پروفایل =================
+
+  // مرحله‌ی ۱: جنسیت (دکمه‌ی اینلاین)
+  bot.callbackQuery(/^profile:gender:(m|f)$/, async (ctx) => {
+    await ctx.answerCallbackQuery();
+    await saveGender(ctx.from.id, ctx.match[1] as Gender);
+    await ctx.deleteMessage().catch(() => {});
+    await askStep(ctx, "age");
+  });
+
+  // مرحله‌ی ۲ و ۳: سن و استان (متن یا دکمه‌ی کیبورد پایین)
+  bot.on("message:text", async (ctx, next) => {
+    const text = ctx.message.text.trim();
+    if (text.startsWith("/")) return next();
+
+    const step = await getStep(ctx.from.id);
+    if (!step) return next();
+    const uid = ctx.from.id;
+
+    if (step === "age") {
+      const age = parseAge(text);
+      if (age === null) {
+        return void (await ctx.reply("⚠️ سن باید یک عدد بین ۹ تا ۹۹ باشد. (برای خروج /menu)"));
+      }
+      await saveAge(uid, age);
+      return void (await askStep(ctx, "province"));
+    }
+
+    // step === "province"
+    if (text === BACK_TEXT) return void (await askStep(ctx, "age"));
+    if (!isProvince(text)) {
+      return void (await ctx.reply("لطفا استان را از لیست پایین انتخاب کن 👇"));
+    }
+    await saveProvince(uid, text);
+    await clearStep(uid);
+    await ctx.reply(
+      "✅ پروفایلت کامل شد! حالا می‌تونی «💬 به یه ناشناس وصلم کن!» رو بزنی.",
+      { reply_markup: idleKb }
+    );
   });
 
   // ================= بخش ادمین =================
