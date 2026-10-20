@@ -102,8 +102,12 @@ export async function searchNews(cat: NewsCategory, win: WindowId, maxItems = 6)
       "⏳ سرویس خبر الان شلوغ است. چند دقیقه بعد دوباره امتحان کن. (سهمیه‌ات کسر نشد)"
     );
   }
-  if (!res.ok) throw new Error(`gemini news http ${res.status}`);
-
+  if (!res.ok) {
+    const body = await res.text().catch(() => "");
+    console.error(`gemini news http ${res.status} model=${model}:`, body.slice(0, 400));
+    throw new Error(`gemini news http ${res.status}`);
+  }
+  
   const json = await res.json();
   const cand = json?.candidates?.[0];
   const text = ((cand?.content?.parts ?? []) as { text?: string }[])
