@@ -26,6 +26,9 @@ import { clearMode, setVoiceMode } from "./mode";
 import { joinQueue, leaveChat, getAnon } from "./anon";
 import { NEWS_CATEGORIES, NEWS_CATEGORY_IDS, WINDOWS, type WindowId } from "./news/categories";
 import { getNews, formatNews } from "./news";
+import { getCoins, grantProfileReward } from "./coins";
+import { getUserByPublicId, getUserRow, sendProfile, toggleSilent } from "./userProfile";
+import { CHAT_INFO, COINS_INFO, PROFILE_INFO } from "./texts";
 import {
   AGE_TEXT,
   BACK_TEXT,
@@ -68,6 +71,10 @@ const HELP_USER = [
   "▫️ برای تبدیل ویس به متن، از منو «🎙 ویس به متن» را بزن و بعد ویس بفرست",
   "▫️ «🎭 به یه ناشناس وصلم کن!» — چت ناشناس با یک نفر دیگر",
   "▫️ /end — پایان چت ناشناس",
+  "",
+  CHAT_INFO,
+  "",
+  PROFILE_INFO,
   "",
   "<i>ربات در حال توسعه است و بخش‌ها به‌تدریج فعال می‌شوند.</i>",
 ].join("\n");
@@ -446,6 +453,15 @@ export function getBot() {
     await ctx.reply(RULES_TEXT, HTML);
   });
 
+  // تنظیم حالت سایلنت
+  bot.command("silent", async (ctx) => {
+    const uid = ctx.from?.id;
+    if (!uid) return;
+    const on = await toggleSilent(uid);
+    if (on === null) return;
+    await ctx.reply(on ? "🔕 حالت سایلنت روشن شد." : "🔔 حالت سایلنت خاموش شد.");
+  });
+
   // ================= چت ناشناس =================
 
   // دکمه‌های کیبورد ثابت پایین
@@ -462,14 +478,47 @@ export function getBot() {
     await ctx.reply(HELP_USER, { ...HTML, reply_markup: homeKb });
   });
 
-  // دکمه‌های جدید کیبورد پایین که هنوز بخشی پشتشان نیست
-  bot.hears(
-    [BTN.search, BTN.nearby, BTN.coins, BTN.profile, BTN.link, BTN.feedback],
-    async (ctx) => {
-      await resetState(ctx);
-      await ctx.reply("این بخش به‌زودی فعال می‌شود 🚧");
+  // 👤 پروفایل
+  bot.hears(BTN.profile, async (ctx) => {
+    await resetState(ctx);
+    const uid = ctx.from!.id;
+    const me = await getUserRow(uid);
+    if (!me) return;
+    if (missingStep(me)) {
+      await ctx.reply("⚠️ اول باید پروفایلت را کامل کنی.");
+      await ensureProfile(ctx);
+      return;
     }
-  );
+    await sendProfile(ctx, me, uid);
+  });
+
+  // 💰 سکه
+  bot.hears(BTN.coins, async (ctx) => {
+    await resetState(ctx);
+    const coins = await getCoins(ctx.from!.id);
+    await ctx.reply(`💰 <b>سکه‌های تو: ${coins}</b>\n\n${COINS_INFO}`, {
+      ...HTML,
+      ...NO_PREVIEW,
+    });
+  });
+
+  // دیدن پروفایل با /user_xxxxxxxx
+  bot.hears(/^\/user_([A-Za-z0-9]{8})$/, async (ctx) => {
+    const target = await getUserByPublicId(ctx.match[1]);
+    if (!target) return void (await ctx.reply("کاربری با این آیدی پیدا نشد."));
+    await sendProfile(ctx, target, ctx.from!.id);
+  });
+
+  // دکمه‌های کیبورد پایین که هنوز بخشی پشتشان نیست
+  bot.hears([BTN.search, BTN.nearby, BTN.link, BTN.feedback], async (ctx) => {
+    await resetState(ctx);
+    await ctx.reply("این بخش به‌زودی فعال می‌شود 🚧");
+  });
+
+  // دکمه‌های اینلاین پروفایل که هنوز بخشی پشتشان نیست
+  bot.callbackQuery(/^pf:/, async (ctx) => {
+    await ctx.answerCallbackQuery({ text: "این بخش به‌زودی فعال می‌شود 🚧" });
+  });
 
   // دکمه‌های اینلاین پنل جستجوی ناشناس
   bot.callbackQuery("anon:random", async (ctx) => {
@@ -541,8 +590,16 @@ export function getBot() {
     }
     await saveProvince(uid, text);
     await clearStep(uid);
+
+    // هدیه‌ی تکمیل پروفایل (فقط یک بار)
+    const reward = await grantProfileReward(uid).catch((e) => {
+      console.error("profile reward error:", e);
+      return null;
+    });
     await ctx.reply(
-      "✅ پروفایلت کامل شد! حالا می‌تونی «💬 به یه ناشناس وصلم کن!» رو بزنی.",
+      "✅ پروفایلت کامل شد!" +
+        (reward ? `\n🎁 ${reward} سکه هدیه گرفتی.` : "") +
+        "\nحالا می‌تونی «💬 به یه ناشناس وصلم کن!» رو بزنی.",
       { reply_markup: idleKb }
     );
   });

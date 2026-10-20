@@ -101,3 +101,16 @@ export const VOICE = {
 export function pickVoiceTier(sec: number) {
   return VOICE.tiers.find((t) => sec <= t.maxSec) ?? null;
 }
+
+export const COINS = {
+  profileReward: 10,
+  genderSearch: 2,
+  directMessage: 1,
+  chatRequest: 2,
+  notifyOnline: 1,
+  notifyChatEnd: 1,
+  newBio: 1,
+  referralJoin: 5,
+  referralComplete: 15,
+  reportReward: 5,
+} as const;

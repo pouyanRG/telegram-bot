@@ -21,15 +21,25 @@ export const users = pgTable("users", {
   username: text("username"),
   firstName: text("first_name"),
   language: text("language"),
-  // پروفایل چت ناشناس
-  gender: text("gender"), // "m" | "f"
-  age: integer("age"), // 9..99
-  province: text("province"), // یکی از ۳۱ استان
+  gender: text("gender"),
+  age: integer("age"),
+  province: text("province"),
   proUntil: ts("pro_until"),
   isBanned: boolean("is_banned").default(false).notNull(),
   createdAt: ts("created_at").defaultNow().notNull(),
   lastSeenAt: ts("last_seen_at").defaultNow().notNull(),
+  coins: integer("coins").default(0).notNull(),
+  profileRewarded: boolean("profile_rewarded").default(false).notNull(),
+  displayName: text("display_name"),
+  city: text("city"),
+  photoFileId: text("photo_file_id"),
+  publicId: text("public_id").unique(), // برای /user_xxxxxxxx
+  silent: boolean("silent").default(false).notNull(),
+  followersCount: integer("followers_count").default(0).notNull(),
+  followingCount: integer("following_count").default(0).notNull(),
+  likesCount: integer("likes_count").default(0).notNull(),
 });
+
 
 export const bans = pgTable("bans", {
   id: serial("id").primaryKey(),
@@ -75,7 +85,6 @@ export const voiceJobs = pgTable(
     fileUniqueId: text("file_unique_id").notNull(),
     declaredSec: integer("declared_sec").notNull(),
     billedSec: integer("billed_sec"),
-    // processing | done | failed
     status: text("status").default("processing").notNull(),
     chargedCost: integer("charged_cost").default(0).notNull(),
     chargedDay: text("charged_day"),
