@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import { InlineKeyboard, Keyboard } from "grammy";
 import { getDb } from "./db";
 import { cache, users } from "./schema";
@@ -97,7 +97,10 @@ export function missingStep(
 }
 
 export const saveGender = (id: number, gender: Gender) =>
-  getDb().update(users).set({ gender }).where(eq(users.telegramId, id));
+  getDb()
+    .update(users)
+    .set({ gender })
+    .where(and(eq(users.telegramId, id), isNull(users.gender)));
 
 export const saveAge = (id: number, age: number) =>
   getDb().update(users).set({ age }).where(eq(users.telegramId, id));

@@ -66,6 +66,7 @@ function buildCaption(
     "",
     `${RLM}تعداد لایک ها : ${u.likesCount}`,
   ];
+  if (u.bio) lines.push("", `${RLM}📝 ${esc(u.bio)}`);
   if (isSelf) {
     lines.push("", `${RLM}تنظیم حالت سایلنت : /silent`);
   } else {
@@ -88,14 +89,25 @@ async function pickPhoto(ctx: Context, u: typeof users.$inferSelect, isSelf: boo
 }
 
 /** نمایش پروفایل؛ اگر target همان بیننده باشد دکمه‌های مدیریت هم نمایش داده می‌شود */
-export async function sendProfile(ctx: Context, target: typeof users.$inferSelect, viewerId: number) {
+export async function sendProfile(
+  ctx: Context,
+  target: typeof users.$inferSelect,
+  viewerId: number,
+  viewerIsAdmin = false
+) {
   const isSelf = target.telegramId === viewerId;
   const publicId = await ensurePublicId(target.telegramId, target.publicId);
   const caption = buildCaption(target, publicId, isSelf);
   const photo = await pickPhoto(ctx, target, isSelf);
+
+  const adminKb =
+    viewerIsAdmin && !isSelf && target.photoFileId
+      ? new InlineKeyboard().text("🗑 حذف عکس", `adm:delphoto:${target.telegramId}`)
+      : undefined;
+
   const opts = {
     parse_mode: "HTML" as const,
-    ...(isSelf ? { reply_markup: profileKb } : {}),
+    ...(isSelf ? { reply_markup: profileKb } : adminKb ? { reply_markup: adminKb } : {}),
   };
 
   if (photo) {

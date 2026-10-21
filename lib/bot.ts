@@ -15,7 +15,7 @@ import {
   takePendingSticker,
   withThinking,
 } from "./admins";
-
+import { registerProfileEdit, clearEdit } from "./profileEdit";
 import { SETTINGS, quotaExceededMessage } from "./config";
 import { consumeQuota, refundQuota } from "./quota";
 import { getPrices, formatPrices, findCoin, formatCoin } from "./prices";
@@ -249,7 +249,7 @@ async function menuFor(ctx: Context) {
 async function resetState(ctx: Context) {
   const uid = ctx.from?.id;
   if (!uid) return;
-  await Promise.all([clearMode(uid), takePendingSticker(uid), clearStep(uid)]).catch((e) =>
+  await Promise.all([clearMode(uid), takePendingSticker(uid), clearStep(uid), clearEdit(uid)]).catch((e) =>
     console.error("resetState error:", e)
   );
 }
@@ -506,7 +506,7 @@ export function getBot() {
   bot.hears(/^\/user_([A-Za-z0-9]{8})$/, async (ctx) => {
     const target = await getUserByPublicId(ctx.match[1]);
     if (!target) return void (await ctx.reply("کاربری با این آیدی پیدا نشد."));
-    await sendProfile(ctx, target, ctx.from!.id);
+        await sendProfile(ctx, target, ctx.from!.id, await isAdminUser(ctx.from!.id));
   });
 
   // دکمه‌های کیبورد پایین که هنوز بخشی پشتشان نیست
@@ -516,7 +516,7 @@ export function getBot() {
   });
 
   // دکمه‌های اینلاین پروفایل که هنوز بخشی پشتشان نیست
-  bot.callbackQuery(/^pf:/, async (ctx) => {
+  bot.callbackQuery(/^pf:(?!edit$)/, async (ctx) => {
     await ctx.answerCallbackQuery({ text: "این بخش به‌زودی فعال می‌شود 🚧" });
   });
 
@@ -554,6 +554,8 @@ export function getBot() {
       }
     }
   });
+
+  registerProfileEdit(bot);
 
   // ================= تکمیل پروفایل =================
 

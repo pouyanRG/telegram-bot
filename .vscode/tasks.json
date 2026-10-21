@@ -346,6 +346,33 @@
 			],
 			"isBackground": false,
 			"problemMatcher": []
+		},
+		{
+			"label": "Temporary Git status review",
+			"type": "shell",
+			"command": "git",
+			"args": [
+				"status",
+				"--short"
+			],
+			"isBackground": false,
+			"problemMatcher": []
+		},
+		{
+			"label": "Temporary Review Commit Changes",
+			"type": "shell",
+			"command": "git",
+			"args": [
+				"diff",
+				"--",
+				"lib/bot.ts",
+				"lib/middleware.ts",
+				"lib/profile.ts",
+				"lib/schema.ts",
+				"lib/userProfile.ts"
+			],
+			"isBackground": false,
+			"problemMatcher": []
 		}
 	]
 }
