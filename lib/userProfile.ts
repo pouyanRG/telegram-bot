@@ -53,7 +53,7 @@ function buildCaption(
   isSelf: boolean
 ) {
   const gender = u.gender === "m" ? "پسر 👨" : u.gender === "f" ? "دختر 👩" : "—";
-  const name = esc(u.displayName ?? u.firstName ?? "—");
+  const name = esc(u.displayName ?? (isSelf ? u.firstName : null) ?? "ناشناس");
   const lines = [
     `${RLM}•نام: ${name}`,
     `${RLM}•جنسیت: ${gender}`,
@@ -75,9 +75,9 @@ function buildCaption(
   return lines.join("\n");
 }
 
-async function pickPhoto(ctx: Context, u: typeof users.$inferSelect) {
+async function pickPhoto(ctx: Context, u: typeof users.$inferSelect, isSelf: boolean) {
   if (u.photoFileId) return u.photoFileId;
-  // اگر عکسی در ربات ثبت نشده، عکس پروفایل تلگرام او استفاده می‌شود
+  if (!isSelf) return null; // عکس تلگرام فقط برای خودِ کاربر
   try {
     const p = await ctx.api.getUserProfilePhotos(u.telegramId, { limit: 1 });
     const sizes = p.photos[0];
@@ -92,7 +92,7 @@ export async function sendProfile(ctx: Context, target: typeof users.$inferSelec
   const isSelf = target.telegramId === viewerId;
   const publicId = await ensurePublicId(target.telegramId, target.publicId);
   const caption = buildCaption(target, publicId, isSelf);
-  const photo = await pickPhoto(ctx, target);
+  const photo = await pickPhoto(ctx, target, isSelf);
   const opts = {
     parse_mode: "HTML" as const,
     ...(isSelf ? { reply_markup: profileKb } : {}),
