@@ -109,6 +109,7 @@ export const admins = pgTable("admins", {
   createdAt: ts("created_at").defaultNow().notNull(),
 });
 
+
 // آپدیت‌های پردازش‌شده‌ی تلگرام؛ برای جلوگیری از پردازش تکراری
 export const processedUpdates = pgTable(
   "processed_updates",
@@ -121,8 +122,10 @@ export const processedUpdates = pgTable(
   })
 );
 
+// ---------- چت ناشناس ----------
 
 // وضعیت چت ناشناس هر کاربر: waiting (در صف) یا chatting (وصل به partnerId)
+// chatId فقط وقتی chatting است پر می‌شود و به anon_chats اشاره می‌کند
 export const anonState = pgTable(
   "anon_state",
   {
@@ -131,12 +134,58 @@ export const anonState = pgTable(
       .references(() => users.telegramId, { onDelete: "cascade" }),
     state: text("state").notNull(),
     partnerId: bigint("partner_id", { mode: "number" }),
+    chatId: integer("chat_id"),
     updatedAt: ts("updated_at").defaultNow().notNull(),
   },
   (t) => ({
     byState: index("anon_state_state_idx").on(t.state, t.updatedAt),
   })
 );
+
+// هر چت ناشناس یک ردیف (حتی بعد از پایان می‌ماند تا حذف پیام‌ها با code ممکن باشد)
+// code: همان بخش آخر /delet_chat_xxxxx
+export const anonChats = pgTable(
+  "anon_chats",
+  {
+    id: serial("id").primaryKey(),
+    code: text("code").notNull().unique(),
+    userA: bigint("user_a", { mode: "number" })
+      .notNull()
+      .references(() => users.telegramId, { onDelete: "cascade" }),
+    userB: bigint("user_b", { mode: "number" })
+      .notNull()
+      .references(() => users.telegramId, { onDelete: "cascade" }),
+    startedAt: ts("started_at").defaultNow().notNull(),
+    endedAt: ts("ended_at"), // null یعنی هنوز فعال
+  },
+  (t) => ({
+    byUserA: index("anon_chats_user_a_idx").on(t.userA),
+    byUserB: index("anon_chats_user_b_idx").on(t.userB),
+    byEnded: index("anon_chats_ended_idx").on(t.endedAt),
+  })
+);
+
+// آیدی پیام‌های رد و بدل‌شده؛ برای «حذف پیام‌ها از هر دو طرف» (تلگرام فقط ۴۸ ساعت اجازه می‌دهد)
+// userId = چتی که این پیام در آن قرار دارد (در چت خصوصی همان آیدی کاربر است)
+export const anonMessages = pgTable(
+  "anon_messages",
+  {
+    id: serial("id").primaryKey(),
+    chatId: integer("chat_id")
+      .notNull()
+      .references(() => anonChats.id, { onDelete: "cascade" }),
+    userId: bigint("user_id", { mode: "number" }).notNull(),
+    messageId: integer("message_id").notNull(),
+    createdAt: ts("created_at").defaultNow().notNull(),
+  },
+  (t) => ({
+    // خواندن پیام‌های ۴۸ ساعت اخیر یک چت
+    byChat: index("anon_messages_chat_idx").on(t.chatId, t.createdAt),
+    // پاک‌سازی دوره‌ای در housekeeping
+    byCreated: index("anon_messages_created_idx").on(t.createdAt),
+  })
+);
+
 export const coinTransactions = pgTable(
   "coin_transactions",
   {

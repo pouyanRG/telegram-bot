@@ -1,14 +1,22 @@
-import { and, eq, sql } from "drizzle-orm";
+import { randomBytes } from "node:crypto";
+import type { Api } from "grammy";
+import { and, eq, gt, isNull, sql } from "drizzle-orm";
 import { getDb } from "./db";
-import { anonState } from "./schema";
+import { anonChats, anonMessages, anonState } from "./schema";
 
-// کسی که بیشتر از این در صف مانده، دیگر برای اتصال در نظر گرفته نمی‌شود
-const WAIT_MINUTES = 10;
+// «حداکثر تا ۲ دقیقه صبر کنید»
+const WAIT_MINUTES = 2;
+// حداقل مدت چت قبل از اینکه بشود قطعش کرد
+export const MIN_CHAT_SEC = 10;
+
+const CODE_ALPHABET = "abcdefghijklmnopqrstuvwxyz0123456789";
+const newCode = () =>
+  Array.from(randomBytes(5), (b) => CODE_ALPHABET[b % CODE_ALPHABET.length]).join("");
 
 export type JoinResult =
   | { status: "chatting"; partnerId: number }
   | { status: "waiting" }
-  | { status: "matched"; partnerId: number };
+  | { status: "matched"; partnerId: number; chatId: number };
 
 export async function joinQueue(me: number): Promise<JoinResult> {
   return getDb().transaction(async (tx) => {
@@ -18,7 +26,6 @@ export async function joinQueue(me: number): Promise<JoinResult> {
     }
     if (cur) await tx.delete(anonState).where(eq(anonState.userId, me)); // صف قدیمی
 
-    // یک نفر منتظر را اتمیک بردار (skip locked: دو نفر همزمان یک نفر را نمی‌گیرند)
     const rows = (await tx.execute(sql`
       update anon_state a
          set state = 'chatting', partner_id = ${me}::bigint, updated_at = now()
@@ -36,8 +43,21 @@ export async function joinQueue(me: number): Promise<JoinResult> {
 
     if (rows.length > 0) {
       const partnerId = Number(rows[0].user_id);
-      await tx.insert(anonState).values({ userId: me, state: "chatting", partnerId });
-      return { status: "matched", partnerId };
+
+      let chatId: number | null = null;
+      for (let i = 0; i < 5 && chatId === null; i++) {
+        const [c] = await tx
+          .insert(anonChats)
+          .values({ code: newCode(), userA: partnerId, userB: me })
+          .onConflictDoNothing()
+          .returning({ id: anonChats.id });
+        if (c) chatId = c.id;
+      }
+      if (chatId === null) throw new Error("could not allocate chat code");
+
+      await tx.update(anonState).set({ chatId }).where(eq(anonState.userId, partnerId));
+      await tx.insert(anonState).values({ userId: me, state: "chatting", partnerId, chatId });
+      return { status: "matched", partnerId, chatId };
     }
 
     await tx.insert(anonState).values({ userId: me, state: "waiting" });
@@ -48,7 +68,7 @@ export async function joinQueue(me: number): Promise<JoinResult> {
 export type LeaveResult =
   | { was: "none" }
   | { was: "waiting" }
-  | { was: "chatting"; partnerId: number | null };
+  | { was: "chatting"; partnerId: number | null; chatId: number | null };
 
 /** خروج از صف یا پایان چت؛ طرف مقابل هم آزاد می‌شود */
 export async function leaveChat(me: number): Promise<LeaveResult> {
@@ -61,12 +81,85 @@ export async function leaveChat(me: number): Promise<LeaveResult> {
         .delete(anonState)
         .where(and(eq(anonState.userId, cur.partnerId), eq(anonState.partnerId, me)));
     }
-    return { was: "chatting", partnerId: cur.partnerId };
+    if (cur.chatId) {
+      await tx
+        .update(anonChats)
+        .set({ endedAt: new Date() })
+        .where(and(eq(anonChats.id, cur.chatId), isNull(anonChats.endedAt)));
+    }
+    return { was: "chatting", partnerId: cur.partnerId, chatId: cur.chatId };
   });
+}
+
+/** فقط لغو جستجو (اگر وسط چت باشد کاری نمی‌کند). true یعنی واقعاً در صف بود */
+export async function cancelSearch(me: number) {
+  const rows = await getDb()
+    .delete(anonState)
+    .where(and(eq(anonState.userId, me), eq(anonState.state, "waiting")))
+    .returning({ id: anonState.userId });
+  return rows.length > 0;
 }
 
 export async function getAnon(me: number) {
   const [r] = await getDb().select().from(anonState).where(eq(anonState.userId, me));
   if (!r) return null;
-  return { state: r.state as "waiting" | "chatting", partnerId: r.partnerId };
+  // بیشتر از ۲ دقیقه در صف مانده؛ دیگر در جستجو حساب نمی‌شود
+  if (r.state === "waiting" && Date.now() - r.updatedAt.getTime() > WAIT_MINUTES * 60_000) {
+    await getDb()
+      .delete(anonState)
+      .where(and(eq(anonState.userId, me), eq(anonState.state, "waiting")));
+    return null;
+  }
+  return { state: r.state as "waiting" | "chatting", partnerId: r.partnerId, chatId: r.chatId };
+}
+
+// ---------- چت‌ها و پیام‌ها ----------
+
+export async function getChat(id: number) {
+  const [c] = await getDb().select().from(anonChats).where(eq(anonChats.id, id));
+  return c ?? null;
+}
+
+export async function getChatByCode(code: string) {
+  const [c] = await getDb().select().from(anonChats).where(eq(anonChats.code, code));
+  return c ?? null;
+}
+
+export async function logMessages(
+  chatId: number,
+  items: { userId: number; messageId: number }[]
+) {
+  await getDb()
+    .insert(anonMessages)
+    .values(items.map((i) => ({ chatId, userId: i.userId, messageId: i.messageId })));
+}
+
+/** پیام‌های ۴۸ ساعت اخیر چت را از هر دو طرف حذف می‌کند؛ تعداد را برمی‌گرداند */
+export async function deleteChatMessages(api: Api, chatId: number) {
+  const db = getDb();
+  const rows = await db
+    .select()
+    .from(anonMessages)
+    .where(
+      and(
+        eq(anonMessages.chatId, chatId),
+        gt(anonMessages.createdAt, new Date(Date.now() - 48 * 3600_000))
+      )
+    );
+
+  const byUser = new Map<number, number[]>();
+  for (const r of rows) {
+    const list = byUser.get(r.userId) ?? [];
+    list.push(r.messageId);
+    byUser.set(r.userId, list);
+  }
+  for (const [uid, ids] of byUser) {
+    for (let i = 0; i < ids.length; i += 100) {
+      await api
+        .deleteMessages(uid, ids.slice(i, i + 100))
+        .catch((e) => console.error("deleteMessages error:", e instanceof Error ? e.message : "unknown"));
+    }
+  }
+  await db.delete(anonMessages).where(eq(anonMessages.chatId, chatId));
+  return rows.length;
 }

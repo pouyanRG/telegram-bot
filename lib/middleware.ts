@@ -9,6 +9,7 @@ async function housekeeping() {
   const db = getDb();
   const steps = [
     sql`delete from processed_updates where created_at < now() - interval '2 days'`,
+    sql`delete from anon_messages where created_at < now() - interval '3 days'`,
     sql`delete from cache
         where (key like 'admin_login:%'
                and (data->>'resetAt')::bigint < (extract(epoch from now()) * 1000)::bigint)

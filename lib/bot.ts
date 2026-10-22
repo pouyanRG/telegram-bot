@@ -23,11 +23,27 @@ import { dedupeUpdates, userGuard } from "./middleware";
 import { mainMenu, BTN, idleKb, waitingKb, chatKb } from "./menu";
 import { handleVoice, voiceGuide } from "./voice";
 import { clearMode, setVoiceMode } from "./mode";
-import { joinQueue, leaveChat, getAnon } from "./anon";
+import {
+  joinQueue,
+  leaveChat,
+  getAnon,
+  cancelSearch,
+  getChat,
+  getChatByCode,
+  logMessages,
+  deleteChatMessages,
+  MIN_CHAT_SEC,
+} from "./anon";
 import { NEWS_CATEGORIES, NEWS_CATEGORY_IDS, WINDOWS, type WindowId } from "./news/categories";
 import { getNews, formatNews } from "./news";
 import { getCoins, grantProfileReward } from "./coins";
-import { getUserByPublicId, getUserRow, sendProfile, toggleSilent } from "./userProfile";
+import {
+  ensurePublicId,
+  getUserByPublicId,
+  getUserRow,
+  sendProfile,
+  toggleSilent,
+} from "./userProfile";
 import { CHAT_INFO, COINS_INFO, PROFILE_INFO } from "./texts";
 import {
   AGE_TEXT,
@@ -54,6 +70,11 @@ let _bot: Bot | null = null;
 
 // ---------- متن‌ها ----------
 
+const RLM = "\u200F";
+
+// اسمی که در پیام «پروفایلت دیده شد» نشان داده می‌شود؛ اسم ربات خودت را بگذار
+const BOT_NAME = "ربات";
+
 const WELCOME = "👋 <b>سلام!</b>\nیکی از بخش‌های زیر را انتخاب کن:";
 
 // پیام /start برای کاربری که پروفایلش کامل است (همراه کیبورد ثابت پایین)
@@ -69,7 +90,7 @@ const HELP_USER = [
   "▫️ /prices — وضعیت بازار و ‌ها",
   "▫️ نام یا نماد هر ارز (مثل <code>btc</code> یا <code>solana</code> یا <code>بیت‌کوین</code>) را بفرست تا رمزارز را ببینی",
   "▫️ برای تبدیل ویس به متن، از منو «🎙 ویس به متن» را بزن و بعد ویس بفرست",
-  "▫️ «🎭 به یه ناشناس وصلم کن!» — چت ناشناس با یک نفر دیگر",
+  "▫️ «💬 به یه ناشناس وصلم کن!» — چت ناشناس با یک نفر دیگر",
   "▫️ /end — پایان چت ناشناس",
   "",
   CHAT_INFO,
@@ -92,8 +113,44 @@ const HELP_OWNER = [
   "▫️ /admins — فهرست ادمین‌ها",
 ].join("\n");
 
-const ANON_MATCHED =
-  "✅ وصل شدی! سلام کن 👋\nهرچی بفرستی (متن، عکس، ویس، استیکر، ...) ناشناس برای طرف مقابل می‌رسد.";
+// پیام بعد از زدن «جستجوی شانسی»
+const ANON_SEARCHING = [
+  "🔎 درحال جستجوی مخاطب ناشناس شما",
+  "🎲 جستوجوی شانسی",
+  "",
+  "⏳ حداکثر تا ۲ دقیقه صبر کنید.",
+].join("\n");
+
+// پیام بعد از اتصال (برای هر دو نفر)
+const ANON_MATCHED = [
+  "👀 پیدا کردم وصلتون کردم، به مخاطبت سلام کن 🗣",
+  "<blockquote expandable>🚫 اخطار: به هیچ کاربری در ربات اعتماد نکنید و اطلاعات شخصیتان را در اختیارشان قرار ندهید",
+  "",
+  "⚠️ درصورتی که کاربر در اول چت از شما خواست به پی وی شخصی او بروید چت را قطع کرده و او را گزارش کنید!</blockquote>",
+].join("\n");
+
+const END_CONFIRM_TEXT = "🤖 پیام سیستم 👇\n\nمطمئنی میخوای چت رو قطع کنی؟";
+
+// برای طرفی که پروفایلش دیده شده
+const PROFILE_VIEWED = [
+  "🤖 پیام سیستم 👇",
+  "",
+  `مخاطب شما 《 پروفایلِ ${BOT_NAME} 》 شما را مشاهده کرد.`,
+  "",
+  `<code>⚠️ توجه: پروفایلِ ${BOT_NAME} اطلاعاتی است که در بخش پروفایل ربات ثبت کرده اید!</code>`,
+].join("\n");
+
+// پیام قطع چت؛ byYou=false یعنی برای طرفی که چتش توسط مخاطب قطع شده
+const endedText = (otherPublicId: string, code: string, byYou: boolean) =>
+  [
+    `${RLM}🎌 چت شما با /user_${otherPublicId} ${byYou ? "توسط شما" : "توسط مخاطب شما"} قطع شد.`,
+    "",
+    `${RLM}برای گزارش عدم رعایت قوانین (/ghavanin) می توانید با لمس 《 🚫 گزارش کاربر 》 در پروفایل، کاربر را گزارش کنید.`,
+    "",
+    `${RLM}🗑 برای حذف کل پیام های در چت هر دو طرف روی /delet_chat_${code} کلیک کنید!`,
+    "",
+    "<blockquote>⚠️ توجه: فقط پیام هایی که تا 48 ساعت پیش ارسال شده باشند حذف میشوند!</blockquote>",
+  ].join("\n");
 
 // پنل انتخاب نوع جستجو (بعد از زدن «به یه ناشناس وصلم کن!»)
 const ANON_PICK_TEXT = [
@@ -154,6 +211,14 @@ const pricesKb = new InlineKeyboard()
   .row()
   .text("🏠 منوی اصلی", "menu:home");
 const cancelStickerKb = new InlineKeyboard().text("❌ انصراف", "admin:sticker_cancel");
+
+// دکمه‌ی شیشه‌ای زیر پیام جستجو
+const cancelSearchKb = new InlineKeyboard().text("❌ لغو جستجو", "anon:cancel");
+
+// ترتیب از چپ به راست: اتمام چت | ادامه چت
+const endConfirmKb = new InlineKeyboard()
+  .text("اتمام چت ❌", "anon:end")
+  .text("ادامه چت 🗣", "anon:keep");
 
 // ترتیب هر ردیف از چپ به راست است (چیدمان تلگرام)
 const anonSearchKb: InlineKeyboardMarkup = {
@@ -333,14 +398,12 @@ async function showAnonOptions(ctx: Context) {
   const a = await getAnon(ctx.from!.id);
 
   if (a?.state === "chatting") {
-    return void (await ctx.reply("الان وسط چت هستی. برای پایان «🛑 پایان چت» را بزن.", {
+    return void (await ctx.reply("الان وسط چت هستی. برای پایان «پایان چت» را بزن.", {
       reply_markup: chatKb,
     }));
   }
   if (a?.state === "waiting") {
-    return void (await ctx.reply("🔎 دنبال یک نفر می‌گردم؛ تا پیدا شدن صبر کن...", {
-      reply_markup: waitingKb,
-    }));
+    return void (await ctx.reply(ANON_SEARCHING, { reply_markup: cancelSearchKb }));
   }
 
   // بدون پروفایل کامل اجازه‌ی چت ناشناس نیست
@@ -366,42 +429,68 @@ async function startAnon(ctx: Context) {
   const r = await joinQueue(uid);
 
   if (r.status === "chatting") {
-    return void (await ctx.reply("الان وسط چت هستی. برای پایان «🛑 پایان چت» را بزن.", {
+    return void (await ctx.reply("الان وسط چت هستی. برای پایان «پایان چت» را بزن.", {
       reply_markup: chatKb,
     }));
   }
   if (r.status === "waiting") {
-    return void (await ctx.reply("🔎 دنبال یک نفر می‌گردم؛ تا پیدا شدن صبر کن...", {
-      reply_markup: waitingKb,
-    }));
+    return void (await ctx.reply(ANON_SEARCHING, { reply_markup: cancelSearchKb }));
   }
 
   // وصل شد: اول به طرف مقابل خبر بده؛ اگر ربات را بلاک کرده بود اتصال لغو می‌شود
   try {
-    await ctx.api.sendMessage(r.partnerId, ANON_MATCHED, { reply_markup: chatKb });
+    await ctx.api.sendMessage(r.partnerId, ANON_MATCHED, { ...HTML, reply_markup: chatKb });
   } catch {
     await leaveChat(uid);
     return void (await ctx.reply("😕 طرف مقابل در دسترس نبود. دوباره امتحان کن.", {
       reply_markup: idleKb,
     }));
   }
-  await ctx.reply(ANON_MATCHED, { reply_markup: chatKb });
+  await ctx.reply(ANON_MATCHED, { ...HTML, reply_markup: chatKb });
 }
 
+async function publicIdOf(userId: number) {
+  const u = await getUserRow(userId);
+  return ensurePublicId(userId, u?.publicId ?? null);
+}
+
+/** با زدن «پایان چت»: سؤال تأیید (ریپلای روی پیام کاربر) */
+async function askEnd(ctx: Context) {
+  const a = await getAnon(ctx.from!.id);
+  if (a?.state !== "chatting") return endAnon(ctx); // در صف است یا چتی ندارد
+  await ctx.reply(END_CONFIRM_TEXT, {
+    ...(ctx.message ? { reply_parameters: { message_id: ctx.message.message_id } } : {}),
+    reply_markup: endConfirmKb,
+  });
+}
+
+/** پایان واقعی چت (یا لغو جستجو) */
 async function endAnon(ctx: Context) {
-  const r = await leaveChat(ctx.from!.id);
-  if (r.was === "chatting") {
-    await ctx.reply("🛑 چت تمام شد.", { reply_markup: idleKb });
+  const uid = ctx.from!.id;
+  const r = await leaveChat(uid);
+
+  if (r.was === "waiting") {
+    return void (await ctx.reply("جستجو لغو شد.", { reply_markup: idleKb }));
+  }
+  if (r.was === "none") {
+    return void (await ctx.reply("الان چت فعالی نداری.", { reply_markup: idleKb }));
+  }
+
+  const chat = r.chatId ? await getChat(r.chatId) : null;
+  if (!chat || !r.partnerId) {
     if (r.partnerId) {
       await ctx.api
         .sendMessage(r.partnerId, "🛑 طرف مقابل چت را ترک کرد.", { reply_markup: idleKb })
         .catch(() => {});
     }
-  } else if (r.was === "waiting") {
-    await ctx.reply("جستجو لغو شد.", { reply_markup: idleKb });
-  } else {
-    await ctx.reply("الان چت فعالی نداری.", { reply_markup: idleKb });
+    return void (await ctx.reply("🛑 چت تمام شد.", { reply_markup: idleKb }));
   }
+
+  const [myPid, partnerPid] = await Promise.all([publicIdOf(uid), publicIdOf(r.partnerId)]);
+  const opts = { ...HTML, ...NO_PREVIEW, reply_markup: idleKb };
+
+  await ctx.reply(endedText(partnerPid, chat.code, true), opts);
+  await ctx.api.sendMessage(r.partnerId, endedText(myPid, chat.code, false), opts).catch(() => {});
 }
 
 // ---------- ساخت ربات ----------
@@ -466,12 +555,48 @@ export function getBot() {
 
   // دکمه‌های کیبورد ثابت پایین
   bot.hears(BTN.connect, showAnonOptions);
-  bot.hears([BTN.cancel, BTN.end], endAnon);
-  bot.command("end", endAnon);
+  bot.hears(BTN.cancel, endAnon); // لغو جستجو (کیبورد قدیمی)
+  bot.hears(BTN.end, askEnd); // «پایان چت» ← سؤال تأیید
+  bot.command("end", askEnd);
   bot.hears(BTN.next, async (ctx) => {
     await endAnon(ctx);
     await startAnon(ctx);
   });
+
+  // 👀 پروفایل مخاطب: پروفایل طرف مقابل برای من، و اعلان «پروفایلت دیده شد» برای او
+  bot.hears(BTN.peer, async (ctx) => {
+    const uid = ctx.from!.id;
+    const a = await getAnon(uid);
+    if (a?.state !== "chatting" || !a.partnerId) {
+      return void (await ctx.reply("الان چت فعالی نداری.", { reply_markup: idleKb }));
+    }
+    const target = await getUserRow(a.partnerId);
+    if (!target) return;
+    await sendProfile(ctx, target, uid);
+    await ctx.api.sendMessage(a.partnerId, PROFILE_VIEWED, HTML).catch(() => {});
+  });
+
+  // 🔒 چت ایمن (فعلاً بدون عملکرد)
+  bot.hears(BTN.safe, async (ctx) => {
+    await ctx.reply("این بخش به‌زودی فعال می‌شود 🚧");
+  });
+
+  // 🗑 حذف پیام‌های چت از هر دو طرف
+  bot.hears(/^\/delet_chat_([a-z0-9]{5})$/, async (ctx) => {
+    const uid = ctx.from!.id;
+    const chat = await getChatByCode(ctx.match[1]);
+    if (!chat || (chat.userA !== uid && chat.userB !== uid)) {
+      return void (await ctx.reply("چتی با این کد پیدا نشد."));
+    }
+    if (!chat.endedAt) return void (await ctx.reply("این چت هنوز فعال است."));
+    const n = await deleteChatMessages(ctx.api, chat.id);
+    await ctx.reply(
+      n > 0
+        ? `🗑 پیام‌های چت از هر دو طرف حذف شد. (${n} پیام)`
+        : "پیامی برای حذف باقی نمانده. (فقط پیام‌های ۴۸ ساعت اخیر حذف می‌شوند)"
+    );
+  });
+
   bot.hears(BTN.menu, showHome);
   bot.hears(BTN.help, async (ctx) => {
     await resetState(ctx);
@@ -506,7 +631,7 @@ export function getBot() {
   bot.hears(/^\/user_([A-Za-z0-9]{8})$/, async (ctx) => {
     const target = await getUserByPublicId(ctx.match[1]);
     if (!target) return void (await ctx.reply("کاربری با این آیدی پیدا نشد."));
-        await sendProfile(ctx, target, ctx.from!.id, await isAdminUser(ctx.from!.id));
+    await sendProfile(ctx, target, ctx.from!.id, await isAdminUser(ctx.from!.id));
   });
 
   // دکمه‌های کیبورد پایین که هنوز بخشی پشتشان نیست
@@ -527,6 +652,45 @@ export function getBot() {
     await startAnon(ctx); // همان منطق صف قبلی
   });
 
+  // ❌ لغو جستجو (دکمه‌ی شیشه‌ای زیر پیام جستجو)
+  bot.callbackQuery("anon:cancel", async (ctx) => {
+    const ok = await cancelSearch(ctx.from.id);
+    await ctx.answerCallbackQuery(ok ? undefined : { text: "الان در حال جستجو نیستی." });
+    await ctx.deleteMessage().catch(() => {});
+    if (ok) await ctx.reply("جستجو لغو شد.", { reply_markup: idleKb });
+  });
+
+  // ادامه چت: فقط پیام تأیید پاک می‌شود
+  bot.callbackQuery("anon:keep", async (ctx) => {
+    await ctx.answerCallbackQuery();
+    await ctx.deleteMessage().catch(() => {});
+  });
+
+  // اتمام چت: قبل از ۱۰ ثانیه از شروع چت، خطا (alert) نشان داده می‌شود
+  bot.callbackQuery("anon:end", async (ctx) => {
+    const a = await getAnon(ctx.from.id);
+    if (a?.state !== "chatting") {
+      await ctx.answerCallbackQuery({ text: "الان چت فعالی نداری." });
+      return void (await ctx.deleteMessage().catch(() => {}));
+    }
+
+    const chat = a.chatId ? await getChat(a.chatId) : null;
+    if (chat) {
+      const elapsed = (Date.now() - chat.startedAt.getTime()) / 1000;
+      if (elapsed < MIN_CHAT_SEC) {
+        const wait = Math.ceil(MIN_CHAT_SEC - elapsed);
+        return void (await ctx.answerCallbackQuery({
+          text: `⚠️ خطا: امکان پایان چت تا ${MIN_CHAT_SEC} ثانیه پس از وصل شدن ممکن نیست! لطفا ${wait} ثانیه دیگر برای پایان چت صبر کنید.`,
+          show_alert: true,
+        }));
+      }
+    }
+
+    await ctx.answerCallbackQuery();
+    await ctx.deleteMessage().catch(() => {});
+    await endAnon(ctx);
+  });
+
   // این‌ها به اطلاعات پروفایل (جنسیت، سن، استان، موقعیت) نیاز دارند
   bot.callbackQuery(/^anon:(boy|girl|nearby|province|age)$/, async (ctx) => {
     await ctx.answerCallbackQuery({ text: "این بخش به‌زودی فعال می‌شود 🚧" });
@@ -542,7 +706,14 @@ export function getBot() {
     if (a?.state !== "chatting" || !a.partnerId) return next();
 
     try {
-      await ctx.api.copyMessage(a.partnerId, ctx.chat.id, ctx.message.message_id);
+      const sent = await ctx.api.copyMessage(a.partnerId, ctx.chat.id, ctx.message.message_id);
+      // آیدی پیام‌ها برای «حذف پیام‌ها از هر دو طرف» ذخیره می‌شود
+      if (a.chatId) {
+        await logMessages(a.chatId, [
+          { userId: ctx.from.id, messageId: ctx.message.message_id },
+          { userId: a.partnerId, messageId: sent.message_id },
+        ]).catch((e) => console.error("logMessages error:", e));
+      }
     } catch (e) {
       if (e instanceof GrammyError && e.error_code === 403) {
         // طرف مقابل ربات را بلاک کرده
