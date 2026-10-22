@@ -60,6 +60,8 @@ export const BTN = {
   end: "🛑 پایان چت",
   next: "⏭ نفر بعدی",
   menu: "📋 منو",
+  peer: "👀 پروفایل مخاطب",
+  safe: "🔒 چت ایمن",
 } as const;
 
 type Btn = {
@@ -88,4 +90,7 @@ export const idleKb = {
 
 export const waitingKb = new Keyboard().text(BTN.cancel).resized().persistent();
 
-export const chatKb = new Keyboard().text(BTN.end).text(BTN.next).resized().persistent();
+export const chatKb = new Keyboard()
+  .text(BTN.peer).text(BTN.safe).row()
+  .text(BTN.end).text(BTN.next)
+  .resized().persistent();

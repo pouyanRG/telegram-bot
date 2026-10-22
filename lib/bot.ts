@@ -1,6 +1,7 @@
 import { UserError } from "./errors";
 import { Bot, GrammyError, InlineKeyboard, type Context } from "grammy";
 import type { InlineKeyboardMarkup } from "grammy/types";
+import { checkRate, shouldWarn } from "./rateLimit";
 
 import {
   addAdmin,
@@ -19,7 +20,7 @@ import { registerProfileEdit, clearEdit } from "./profileEdit";
 import { SETTINGS, quotaExceededMessage } from "./config";
 import { consumeQuota, refundQuota } from "./quota";
 import { getPrices, formatPrices, findCoin, formatCoin } from "./prices";
-import { dedupeUpdates, userGuard } from "./middleware";
+import { dedupeUpdates, userGuard, throttle } from "./middleware";
 import { mainMenu, BTN, idleKb, waitingKb, chatKb } from "./menu";
 import { handleVoice, voiceGuide } from "./voice";
 import { clearMode, setVoiceMode } from "./mode";
@@ -506,6 +507,7 @@ export function getBot() {
   // اول ضد تکرار، بعد بررسی کاربر
   bot.use(dedupeUpdates);
   bot.use(userGuard);
+  bot.use(throttle);
 
   // ================= خبر: فقط ادمین =================
   // قبل از همه‌ی handlerهای خبر می‌آید؛ برای غیرادمین جلوی ادامه را می‌گیرد
