@@ -1,4 +1,4 @@
-import { randomBytes } from "node:crypto";
+﻿import { randomBytes } from "node:crypto";
 import { eq } from "drizzle-orm";
 import { InlineKeyboard, type Context } from "grammy";
 import { getDb } from "./db";
@@ -12,7 +12,7 @@ const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replac
 const newPublicId = () =>
   Array.from(randomBytes(8), (b) => ALPHABET[b % ALPHABET.length]).join("");
 
-async function ensurePublicId(userId: number, current: string | null) {
+export async function ensurePublicId(userId: number, current: string | null) {
   if (current) return current;
   for (let i = 0; i < 5; i++) {
     const id = newPublicId();
@@ -30,55 +30,55 @@ async function ensurePublicId(userId: number, current: string | null) {
   throw new Error("could not allocate publicId");
 }
 
-// ترتیب هر ردیف از چپ به راست است (مثل بقیه‌ی کیبوردهای پروژه)
+// ØªØ±ØªÛŒØ¨ Ù‡Ø± Ø±Ø¯ÛŒÙ Ø§Ø² Ú†Ù¾ Ø¨Ù‡ Ø±Ø§Ø³Øª Ø§Ø³Øª (Ù…Ø«Ù„ Ø¨Ù‚ÛŒÙ‡â€ŒÛŒ Ú©ÛŒØ¨ÙˆØ±Ø¯Ù‡Ø§ÛŒ Ù¾Ø±ÙˆÚ˜Ù‡)
 export const profileKb = new InlineKeyboard()
-  .text("⚙️ تنظیمات حساب کاربری", "pf:settings")
+  .text("âš™ï¸ ØªÙ†Ø¸ÛŒÙ…Ø§Øª Ø­Ø³Ø§Ø¨ Ú©Ø§Ø±Ø¨Ø±ÛŒ", "pf:settings")
   .row()
-  .text("🖌 تغییر یوزرنیم", "pf:username")
-  .text("📝ویرایش پروفایل", "pf:edit")
+  .text("ðŸ–Œ ØªØºÛŒÛŒØ± ÛŒÙˆØ²Ø±Ù†ÛŒÙ…", "pf:username")
+  .text("ðŸ“ÙˆÛŒØ±Ø§ÛŒØ´ Ù¾Ø±ÙˆÙØ§ÛŒÙ„", "pf:edit")
   .row()
-  .text("مشاهده لایک کننده ها ❤️", "pf:likers")
+  .text("Ù…Ø´Ø§Ù‡Ø¯Ù‡ Ù„Ø§ÛŒÚ© Ú©Ù†Ù†Ø¯Ù‡ Ù‡Ø§ â¤ï¸", "pf:likers")
   .row()
-  .text("🚫 بلاک لیست ❗️", "pf:blocks")
-  .text("👥 گفت و گو های اخیر", "pf:recent")
+  .text("ðŸš« Ø¨Ù„Ø§Ú© Ù„ÛŒØ³Øª â—ï¸", "pf:blocks")
+  .text("ðŸ‘¥ Ú¯ÙØª Ùˆ Ú¯Ùˆ Ù‡Ø§ÛŒ Ø§Ø®ÛŒØ±", "pf:recent")
   .row()
-  .text("📌 موقعیت مکانی", "pf:location")
-  .text("👫 دوستان", "pf:friends")
+  .text("ðŸ“Œ Ù…ÙˆÙ‚Ø¹ÛŒØª Ù…Ú©Ø§Ù†ÛŒ", "pf:location")
+  .text("ðŸ‘« Ø¯ÙˆØ³ØªØ§Ù†", "pf:friends")
   .row()
-  .text("❌ دلیت اکانت", "pf:delete");
+  .text("âŒ Ø¯Ù„ÛŒØª Ø§Ú©Ø§Ù†Øª", "pf:delete");
 
 function buildCaption(
   u: typeof users.$inferSelect,
   publicId: string,
   isSelf: boolean
 ) {
-  const gender = u.gender === "m" ? "پسر 👨" : u.gender === "f" ? "دختر 👩" : "—";
-  const name = esc(u.displayName ?? (isSelf ? u.firstName : null) ?? "ناشناس");
+  const gender = u.gender === "m" ? "Ù¾Ø³Ø± ðŸ‘¨" : u.gender === "f" ? "Ø¯Ø®ØªØ± ðŸ‘©" : "â€”";
+  const name = esc(u.displayName ?? (isSelf ? u.firstName : null) ?? "Ù†Ø§Ø´Ù†Ø§Ø³");
   const lines = [
-    `${RLM}•نام: ${name}`,
-    `${RLM}•جنسیت: ${gender}`,
-    `${RLM}دنبال کننده ها: ${u.followersCount}`,
-    `${RLM}دنبال میکند: ${u.followingCount}`,
-    `${RLM}•استان: ${esc(u.province ?? "—")}`,
-    `${RLM}•شهر: ${esc(u.city ?? "—")}`,
-    `${RLM}•سن: ${u.age ?? "—"}`,
-    `${RLM}🆔 : /user_${publicId}`,
+    `${RLM}â€¢Ù†Ø§Ù…: ${name}`,
+    `${RLM}â€¢Ø¬Ù†Ø³ÛŒØª: ${gender}`,
+    `${RLM}Ø¯Ù†Ø¨Ø§Ù„ Ú©Ù†Ù†Ø¯Ù‡ Ù‡Ø§: ${u.followersCount}`,
+    `${RLM}Ø¯Ù†Ø¨Ø§Ù„ Ù…ÛŒÚ©Ù†Ø¯: ${u.followingCount}`,
+    `${RLM}â€¢Ø§Ø³ØªØ§Ù†: ${esc(u.province ?? "â€”")}`,
+    `${RLM}â€¢Ø´Ù‡Ø±: ${esc(u.city ?? "â€”")}`,
+    `${RLM}â€¢Ø³Ù†: ${u.age ?? "â€”"}`,
+    `${RLM}ðŸ†” : /user_${publicId}`,
     "",
-    `${RLM}تعداد لایک ها : ${u.likesCount}`,
+    `${RLM}ØªØ¹Ø¯Ø§Ø¯ Ù„Ø§ÛŒÚ© Ù‡Ø§ : ${u.likesCount}`,
   ];
-  if (u.bio) lines.push("", `${RLM}📝 ${esc(u.bio)}`);
+  if (u.bio) lines.push("", `${RLM}ðŸ“ ${esc(u.bio)}`);
   if (isSelf) {
-    lines.push("", `${RLM}تنظیم حالت سایلنت : /silent`);
+    lines.push("", `${RLM}ØªÙ†Ø¸ÛŒÙ… Ø­Ø§Ù„Øª Ø³Ø§ÛŒÙ„Ù†Øª : /silent`);
   } else {
     const joined = u.createdAt.toLocaleDateString("fa-IR", { timeZone: "Asia/Tehran" });
-    lines.push("", `${RLM}📅 تاریخ عضویت: ${joined}`);
+    lines.push("", `${RLM}ðŸ“… ØªØ§Ø±ÛŒØ® Ø¹Ø¶ÙˆÛŒØª: ${joined}`);
   }
   return lines.join("\n");
 }
 
 async function pickPhoto(ctx: Context, u: typeof users.$inferSelect, isSelf: boolean) {
   if (u.photoFileId) return u.photoFileId;
-  if (!isSelf) return null; // عکس تلگرام فقط برای خودِ کاربر
+  if (!isSelf) return null; // Ø¹Ú©Ø³ ØªÙ„Ú¯Ø±Ø§Ù… ÙÙ‚Ø· Ø¨Ø±Ø§ÛŒ Ø®ÙˆØ¯Ù Ú©Ø§Ø±Ø¨Ø±
   try {
     const p = await ctx.api.getUserProfilePhotos(u.telegramId, { limit: 1 });
     const sizes = p.photos[0];
@@ -88,7 +88,7 @@ async function pickPhoto(ctx: Context, u: typeof users.$inferSelect, isSelf: boo
   }
 }
 
-/** نمایش پروفایل؛ اگر target همان بیننده باشد دکمه‌های مدیریت هم نمایش داده می‌شود */
+/** Ù†Ù…Ø§ÛŒØ´ Ù¾Ø±ÙˆÙØ§ÛŒÙ„Ø› Ø§Ú¯Ø± target Ù‡Ù…Ø§Ù† Ø¨ÛŒÙ†Ù†Ø¯Ù‡ Ø¨Ø§Ø´Ø¯ Ø¯Ú©Ù…Ù‡â€ŒÙ‡Ø§ÛŒ Ù…Ø¯ÛŒØ±ÛŒØª Ù‡Ù… Ù†Ù…Ø§ÛŒØ´ Ø¯Ø§Ø¯Ù‡ Ù…ÛŒâ€ŒØ´ÙˆØ¯ */
 export async function sendProfile(
   ctx: Context,
   target: typeof users.$inferSelect,
@@ -102,7 +102,7 @@ export async function sendProfile(
 
   const adminKb =
     viewerIsAdmin && !isSelf && target.photoFileId
-      ? new InlineKeyboard().text("🗑 حذف عکس", `adm:delphoto:${target.telegramId}`)
+      ? new InlineKeyboard().text("ðŸ—‘ Ø­Ø°Ù Ø¹Ú©Ø³", `adm:delphoto:${target.telegramId}`)
       : undefined;
 
   const opts = {

@@ -13,6 +13,8 @@
     "commands:set:proxy": "cross-env HTTP_PROXY=http://127.0.0.1:10808 HTTPS_PROXY=http://127.0.0.1:10808 NO_PROXY= node --use-env-proxy --env-file=.env.local scripts/set-commands.mjs"
   },
   "dependencies": {
+    "@upstash/ratelimit": "^2.2.0",
+    "@upstash/redis": "^1.39.0",
     "drizzle-orm": "^0.36.0",
     "grammy": "^1.30.0",
     "next": "^15.0.0",

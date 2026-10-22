@@ -699,34 +699,62 @@ export function getBot() {
   // رد و بدل پیام بین دو نفر (متن، عکس، ویس، استیکر، ...).
   // باید قبل از handlerهای ویس/استیکر/متن بیاید.
   // copyMessage فرستنده را نشان نمی‌دهد (پیام «فوروارد‌شده» نیست).
-  bot.on("message", async (ctx, next) => {
-    if (ctx.message.text?.startsWith("/")) return next();
+ 
+bot.on("message", async (ctx, next) => {
+  if (ctx.message.text?.startsWith("/")) return next();
 
-    const a = await getAnon(ctx.from.id);
-    if (a?.state !== "chatting" || !a.partnerId) return next();
+  const a = await getAnon(ctx.from.id);
+  if (a?.state !== "chatting" || !a.partnerId) return next();
 
-    try {
-      const sent = await ctx.api.copyMessage(a.partnerId, ctx.chat.id, ctx.message.message_id);
-      // آیدی پیام‌ها برای «حذف پیام‌ها از هر دو طرف» ذخیره می‌شود
-      if (a.chatId) {
-        await logMessages(a.chatId, [
-          { userId: ctx.from.id, messageId: ctx.message.message_id },
-          { userId: a.partnerId, messageId: sent.message_id },
-        ]).catch((e) => console.error("logMessages error:", e));
-      }
-    } catch (e) {
-      if (e instanceof GrammyError && e.error_code === 403) {
-        // طرف مقابل ربات را بلاک کرده
-        await leaveChat(ctx.from.id);
-        await ctx.reply("🛑 طرف مقابل در دسترس نیست؛ چت تمام شد.", { reply_markup: idleKb });
-      } else {
-        console.error("anon relay error:", e instanceof Error ? e.message : "unknown");
-        await ctx.reply("⚠️ پیام ارسال نشد. دوباره بفرست.");
-      }
+  // محدودیت سخت‌گیرانه برای ارسال پیام به طرف مقابل
+  if (!(await checkRate("relay", ctx.from.id))) {
+    if (await shouldWarn(ctx.from.id)) {
+      await ctx.reply(
+        "⏳ پیام‌هایت خیلی سریع است؛ این پیام ارسال نشد."
+      ).catch(() => {});
     }
-  });
+    return;
+  }
 
-  registerProfileEdit(bot);
+  try {
+    const sent = await ctx.api.copyMessage(
+      a.partnerId,
+      ctx.chat.id,
+      ctx.message.message_id
+    );
+
+    // ذخیره آیدی پیام‌ها برای حذف پیام‌ها از هر دو طرف
+    if (a.chatId) {
+      await logMessages(a.chatId, [
+        {
+          userId: ctx.from.id,
+          messageId: ctx.message.message_id,
+        },
+        {
+          userId: a.partnerId,
+          messageId: sent.message_id,
+        },
+      ]).catch((e) => console.error("logMessages error:", e));
+    }
+  } catch (e) {
+    if (e instanceof GrammyError && e.error_code === 403) {
+      // طرف مقابل ربات را بلاک کرده
+      await leaveChat(ctx.from.id);
+      await ctx.reply(
+        "🛑 طرف مقابل در دسترس نیست؛ چت تمام شد.",
+        { reply_markup: idleKb }
+      );
+    } else {
+      console.error(
+        "anon relay error:",
+        e instanceof Error ? e.message : "unknown"
+      );
+      await ctx.reply("⚠️ پیام ارسال نشد. دوباره بفرست.");
+    }
+  }
+});
+
+registerProfileEdit(bot);
 
   // ================= تکمیل پروفایل =================
 

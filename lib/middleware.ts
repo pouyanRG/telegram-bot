@@ -2,6 +2,7 @@ import type { Context, NextFunction } from "grammy";
 import { eq, sql } from "drizzle-orm";
 import { getDb } from "./db";
 import { processedUpdates, users } from "./schema";
+import { checkRate, shouldWarn } from "./rateLimit";
 
 // ---------- پاک‌سازی دوره‌ای ----------
 
@@ -114,4 +115,17 @@ export async function userGuard(ctx: Context, next: NextFunction) {
   }
 
   await next();
+}
+
+export async function throttle(ctx: Context, next: NextFunction) {
+  const id = ctx.from?.id;
+  if (!id || ctx.chat?.type !== "private") return next();
+
+  if (await checkRate("general", id)) return next();
+
+  if (ctx.callbackQuery) await ctx.answerCallbackQuery().catch(() => {});
+  if (await shouldWarn(id)) {
+    await ctx.reply("⏳ خیلی سریع پیام می‌فرستی. چند ثانیه صبر کن.").catch(() => {});
+  }
+  // next() صدا زده نمی‌شود: هیچ کوئری دیتابیسی اجرا نمی‌شود
 }
