@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
 import type { Api } from "grammy";
-import { and, eq, gt, isNull, sql } from "drizzle-orm";
+import { and, desc, eq, gt, isNull, or, sql } from "drizzle-orm";
 import { getDb } from "./db";
 import { anonChats, anonMessages, anonState } from "./schema";
 
@@ -127,11 +127,11 @@ export async function getChatByCode(code: string) {
 
 export async function logMessages(
   chatId: number,
-  items: { userId: number; messageId: number }[]
+  items: { userId: number; messageId: number; fromId: number }[]
 ) {
   await getDb()
     .insert(anonMessages)
-    .values(items.map((i) => ({ chatId, userId: i.userId, messageId: i.messageId })));
+    .values(items.map((i) => ({ chatId, userId: i.userId, messageId: i.messageId, fromId: i.fromId })));
 }
 
 /** پیام‌های ۴۸ ساعت اخیر چت را از هر دو طرف حذف می‌کند؛ تعداد را برمی‌گرداند */
@@ -162,4 +162,32 @@ export async function deleteChatMessages(api: Api, chatId: number) {
   }
   await db.delete(anonMessages).where(eq(anonMessages.chatId, chatId));
   return rows.length;
+}
+
+
+/** آخرین چت بین دو کاربر */
+export async function findLastChatBetween(a: number, b: number) {
+  const [c] = await getDb()
+    .select()
+    .from(anonChats)
+    .where(
+      or(
+        and(eq(anonChats.userA, a), eq(anonChats.userB, b)),
+        and(eq(anonChats.userA, b), eq(anonChats.userB, a))
+      )
+    )
+    .orderBy(desc(anonChats.id))
+    .limit(1);
+  return c ?? null;
+}
+
+/** ۱۵۰ پیام آخر چت از دید یک کاربر (هم پیام‌های خودش، هم پیام‌های دریافتی) */
+export async function snapshotChat(chatId: number, viewerId: number) {
+  const rows = await getDb()
+    .select({ m: anonMessages.messageId, f: anonMessages.fromId })
+    .from(anonMessages)
+    .where(and(eq(anonMessages.chatId, chatId), eq(anonMessages.userId, viewerId)))
+    .orderBy(desc(anonMessages.id))
+    .limit(150);
+  return rows.reverse();
 }

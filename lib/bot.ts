@@ -1,8 +1,21 @@
 import { UserError } from "./errors";
+import { NEWS_CATEGORIES, NEWS_CATEGORY_IDS, WINDOWS, type WindowId } from "./news/categories";
 import { Bot, GrammyError, InlineKeyboard, type Context } from "grammy";
 import type { InlineKeyboardMarkup } from "grammy/types";
 import { checkRate, shouldWarn } from "./rateLimit";
-
+import { registerReports, clearReport, takePendingDefPhoto } from "./reports";
+import { sendPeerProfile } from "./peerProfile";
+import { registerProfileEdit, clearEdit } from "./profileEdit";
+import { SETTINGS, quotaExceededMessage } from "./config";
+import { consumeQuota, refundQuota } from "./quota";
+import { getPrices, formatPrices, findCoin, formatCoin } from "./prices";
+import { dedupeUpdates, userGuard, throttle } from "./middleware";
+import { mainMenu, BTN, idleKb, waitingKb, chatKb } from "./menu";
+import { handleVoice, voiceGuide } from "./voice";
+import { clearMode, setVoiceMode } from "./mode";
+import { getNews, formatNews } from "./news";
+import { getCoins, grantProfileReward } from "./coins";
+import { CHAT_INFO, COINS_INFO, PROFILE_INFO } from "./texts";
 import {
   addAdmin,
   isAdminUser,
@@ -16,14 +29,6 @@ import {
   takePendingSticker,
   withThinking,
 } from "./admins";
-import { registerProfileEdit, clearEdit } from "./profileEdit";
-import { SETTINGS, quotaExceededMessage } from "./config";
-import { consumeQuota, refundQuota } from "./quota";
-import { getPrices, formatPrices, findCoin, formatCoin } from "./prices";
-import { dedupeUpdates, userGuard, throttle } from "./middleware";
-import { mainMenu, BTN, idleKb, waitingKb, chatKb } from "./menu";
-import { handleVoice, voiceGuide } from "./voice";
-import { clearMode, setVoiceMode } from "./mode";
 import {
   joinQueue,
   leaveChat,
@@ -35,9 +40,6 @@ import {
   deleteChatMessages,
   MIN_CHAT_SEC,
 } from "./anon";
-import { NEWS_CATEGORIES, NEWS_CATEGORY_IDS, WINDOWS, type WindowId } from "./news/categories";
-import { getNews, formatNews } from "./news";
-import { getCoins, grantProfileReward } from "./coins";
 import {
   ensurePublicId,
   getUserByPublicId,
@@ -45,7 +47,6 @@ import {
   sendProfile,
   toggleSilent,
 } from "./userProfile";
-import { CHAT_INFO, COINS_INFO, PROFILE_INFO } from "./texts";
 import {
   AGE_TEXT,
   BACK_TEXT,
@@ -273,6 +274,8 @@ const backToSettingsKb = new InlineKeyboard().text("🔙 برگشت", "menu:sett
 /** دکمه‌های تنظیمات؛ فقط بعد از زدن «Setting» دیده می‌شوند و با «برگشت» از بین می‌روند */
 function settingsKb(owner: boolean) {
   const kb = new InlineKeyboard().text("🎞 تنظیم استیکر فکرکردن", "admin:sticker").row();
+  kb.text("🚨 گزارش‌ها", "admin:reports").row();
+  kb.text("🖼 عکس پیش‌فرض پسر", "admin:defphoto:m").text("🖼 عکس پیش‌فرض دختر", "admin:defphoto:f").row();
   if (owner) kb.text("👥 فهرست ادمین‌ها", "admin:list").row();
   return kb.text("🔙 برگشت", "menu:home");
 }
@@ -315,9 +318,10 @@ async function menuFor(ctx: Context) {
 async function resetState(ctx: Context) {
   const uid = ctx.from?.id;
   if (!uid) return;
-  await Promise.all([clearMode(uid), takePendingSticker(uid), clearStep(uid), clearEdit(uid)]).catch((e) =>
-    console.error("resetState error:", e)
-  );
+  await Promise.all([
+    clearMode(uid), takePendingSticker(uid), clearStep(uid), clearEdit(uid),
+    clearReport(uid), takePendingDefPhoto(uid),
+  ]).catch((e) => console.error("resetState error:", e));
 }
 
 // ---------- تکمیل پروفایل (جنسیت ← سن ← استان) ----------
@@ -574,7 +578,7 @@ export function getBot() {
     }
     const target = await getUserRow(a.partnerId);
     if (!target) return;
-    await sendProfile(ctx, target, uid);
+    await sendPeerProfile(ctx, target, uid, await isAdminUser(uid));
     await ctx.api.sendMessage(a.partnerId, PROFILE_VIEWED, HTML).catch(() => {});
   });
 
@@ -629,12 +633,14 @@ export function getBot() {
     });
   });
 
-  // دیدن پروفایل با /user_xxxxxxxx
+    // دیدن پروفایل با /user_xxxxxxxx
   bot.hears(/^\/user_([A-Za-z0-9]{8})$/, async (ctx) => {
     const target = await getUserByPublicId(ctx.match[1]);
     if (!target) return void (await ctx.reply("کاربری با این آیدی پیدا نشد."));
-    await sendProfile(ctx, target, ctx.from!.id, await isAdminUser(ctx.from!.id));
+    const viewer = ctx.from!.id;
+    await sendPeerProfile(ctx, target, viewer, await isAdminUser(viewer));
   });
+
 
   // دکمه‌های کیبورد پایین که هنوز بخشی پشتشان نیست
   bot.hears([BTN.search, BTN.nearby, BTN.link, BTN.feedback], async (ctx) => {
@@ -728,14 +734,8 @@ bot.on("message", async (ctx, next) => {
     // ذخیره آیدی پیام‌ها برای حذف پیام‌ها از هر دو طرف
     if (a.chatId) {
       await logMessages(a.chatId, [
-        {
-          userId: ctx.from.id,
-          messageId: ctx.message.message_id,
-        },
-        {
-          userId: a.partnerId,
-          messageId: sent.message_id,
-        },
+        { userId: ctx.from.id, messageId: ctx.message.message_id, fromId: ctx.from.id },
+        { userId: a.partnerId, messageId: sent.message_id, fromId: ctx.from.id },
       ]).catch((e) => console.error("logMessages error:", e));
     }
   } catch (e) {
@@ -757,6 +757,7 @@ bot.on("message", async (ctx, next) => {
 });
 
 registerProfileEdit(bot);
+registerReports(bot);
 
   // ================= تکمیل پروفایل =================
 

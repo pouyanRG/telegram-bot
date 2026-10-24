@@ -176,7 +176,9 @@ export const anonMessages = pgTable(
       .references(() => anonChats.id, { onDelete: "cascade" }),
     userId: bigint("user_id", { mode: "number" }).notNull(),
     messageId: integer("message_id").notNull(),
+    fromId: bigint("from_id", { mode: "number" }), // ← جدید
     createdAt: ts("created_at").defaultNow().notNull(),
+
   },
   (t) => ({
     // خواندن پیام‌های ۴۸ ساعت اخیر یک چت
@@ -204,4 +206,43 @@ export const coinTransactions = pgTable(
     uniqRef: uniqueIndex("coin_tx_user_reason_ref_uq").on(t.userId, t.reason, t.ref),
     byUser: index("coin_tx_user_idx").on(t.userId, t.id),
   })
+);
+
+// هر کاربر فقط یک بار می‌تواند یک پروفایل را لایک کند
+export const profileLikes = pgTable(
+  "profile_likes",
+  {
+    likerId: bigint("liker_id", { mode: "number" })
+      .notNull()
+      .references(() => users.telegramId, { onDelete: "cascade" }),
+    targetId: bigint("target_id", { mode: "number" })
+      .notNull()
+      .references(() => users.telegramId, { onDelete: "cascade" }),
+    createdAt: ts("created_at").defaultNow().notNull(),
+  },
+  (t) => ({ pk: primaryKey({ columns: [t.likerId, t.targetId] }) })
+);
+
+// گزارش تخلف؛ status: pending | confirmed | rejected
+// evidence: عکس‌فوری از شناسه‌ی پیام‌های چت (از دید گزارش‌دهنده)
+export const reports = pgTable(
+  "reports",
+  {
+    id: serial("id").primaryKey(),
+    reporterId: bigint("reporter_id", { mode: "number" })
+      .notNull()
+      .references(() => users.telegramId, { onDelete: "cascade" }),
+    targetId: bigint("target_id", { mode: "number" })
+      .notNull()
+      .references(() => users.telegramId, { onDelete: "cascade" }),
+    reason: text("reason").notNull(),
+    details: text("details").notNull(),
+    chatId: integer("chat_id"),
+    evidence: jsonb("evidence"),
+    status: text("status").default("pending").notNull(),
+    reviewedBy: bigint("reviewed_by", { mode: "number" }),
+    reviewedAt: ts("reviewed_at"),
+    createdAt: ts("created_at").defaultNow().notNull(),
+  },
+  (t) => ({ byStatus: index("reports_status_idx").on(t.status, t.id) })
 );

@@ -4,6 +4,8 @@ import { InlineKeyboard, type Context } from "grammy";
 import { getDb } from "./db";
 import { users } from "./schema";
 import { isUniqueViolation } from "./errors";
+import { getDefaultPhoto } from "./defaultPhoto"; 
+
 
 const RLM = "\u200F";
 const ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789";
@@ -78,14 +80,15 @@ function buildCaption(
 
 async function pickPhoto(ctx: Context, u: typeof users.$inferSelect, isSelf: boolean) {
   if (u.photoFileId) return u.photoFileId;
-  if (!isSelf) return null; // عکس تلگرام فقط برای خودِ کاربر
-  try {
-    const p = await ctx.api.getUserProfilePhotos(u.telegramId, { limit: 1 });
-    const sizes = p.photos[0];
-    return sizes?.[sizes.length - 1]?.file_id ?? null;
-  } catch {
-    return null;
+  if (isSelf) {
+    try {
+      const p = await ctx.api.getUserProfilePhotos(u.telegramId, { limit: 1 });
+      const sizes = p.photos[0];
+      const id = sizes?.[sizes.length - 1]?.file_id;
+      if (id) return id;
+    } catch {}
   }
+  return getDefaultPhoto(u.gender).catch(() => null);
 }
 
 /** نمایش پروفایل؛ اگر target همان بیننده باشد دکمه‌های مدیریت هم نمایش داده می‌شود */
