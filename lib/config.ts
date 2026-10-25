@@ -113,4 +113,5 @@ export const COINS = {
   referralJoin: 5,
   referralComplete: 15,
   reportReward: 5,
+  shortChatRefund: 1,
 } as const;

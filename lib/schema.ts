@@ -39,6 +39,7 @@ export const users = pgTable("users", {
   followingCount: integer("following_count").default(0).notNull(),
   likesCount: integer("likes_count").default(0).notNull(),
   bio: text("bio"),
+  anonCode: text("anon_code").unique(), // کد لینک ناشناس، مثل sc-m3m7kBV9
 });
 
 
@@ -135,7 +136,13 @@ export const anonState = pgTable(
     state: text("state").notNull(),
     partnerId: bigint("partner_id", { mode: "number" }),
     chatId: integer("chat_id"),
+    wantScope: text("want_scope"), // province | age | null
+    wantGender: text("want_gender"), // m | f | null
+    myGender: text("my_gender"),
+    myAge: integer("my_age"),
+    myProvince: text("my_province"),
     updatedAt: ts("updated_at").defaultNow().notNull(),
+    
   },
   (t) => ({
     byState: index("anon_state_state_idx").on(t.state, t.updatedAt),
@@ -156,7 +163,9 @@ export const anonChats = pgTable(
       .notNull()
       .references(() => users.telegramId, { onDelete: "cascade" }),
     startedAt: ts("started_at").defaultNow().notNull(),
-    endedAt: ts("ended_at"), // null یعنی هنوز فعال
+    endedAt: ts("ended_at"),
+    paidA: integer("paid_a").default(0).notNull(), // سکه‌ای که userA برای این چت داده
+    paidB: integer("paid_b").default(0).notNull(),
   },
   (t) => ({
     byUserA: index("anon_chats_user_a_idx").on(t.userA),
@@ -245,4 +254,24 @@ export const reports = pgTable(
     createdAt: ts("created_at").defaultNow().notNull(),
   },
   (t) => ({ byStatus: index("reports_status_idx").on(t.status, t.id) })
+);
+// پیام‌های ناشناسِ لینک ناشناس
+export const anonDirect = pgTable(
+  "anon_direct",
+  {
+    id: serial("id").primaryKey(),
+    code: text("code").notNull().unique(), // همان #xxxxxx زیر پیام
+    fromId: bigint("from_id", { mode: "number" })
+      .notNull()
+      .references(() => users.telegramId, { onDelete: "cascade" }),
+    toId: bigint("to_id", { mode: "number" })
+      .notNull()
+      .references(() => users.telegramId, { onDelete: "cascade" }),
+    kind: text("kind").notNull(), // text | media
+    body: text("body"), // متن یا کپشن
+    srcMsgId: integer("src_msg_id").notNull(), // پیام اصلی در چت فرستنده (برای copyMessage)
+    replyTo: integer("reply_to"),
+    createdAt: ts("created_at").defaultNow().notNull(),
+  },
+  (t) => ({ byTo: index("anon_direct_to_idx").on(t.toId, t.id) })
 );

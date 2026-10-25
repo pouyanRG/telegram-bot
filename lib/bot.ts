@@ -6,7 +6,8 @@ import { checkRate, shouldWarn } from "./rateLimit";
 import { registerReports, clearReport, takePendingDefPhoto } from "./reports";
 import { sendPeerProfile } from "./peerProfile";
 import { registerProfileEdit, clearEdit } from "./profileEdit";
-import { SETTINGS, quotaExceededMessage } from "./config";
+import { SETTINGS, COINS, quotaExceededMessage } from "./config";
+import { registerAnonLink, handleStartPayload, sendMyLink, clearDmState } from "./anonLink";
 import { consumeQuota, refundQuota } from "./quota";
 import { getPrices, formatPrices, findCoin, formatCoin } from "./prices";
 import { dedupeUpdates, userGuard, throttle } from "./middleware";
@@ -39,7 +40,10 @@ import {
   logMessages,
   deleteChatMessages,
   MIN_CHAT_SEC,
+  RANDOM,
+  type SearchOpts,
 } from "./anon";
+
 import {
   ensurePublicId,
   getUserByPublicId,
@@ -320,7 +324,7 @@ async function resetState(ctx: Context) {
   if (!uid) return;
   await Promise.all([
     clearMode(uid), takePendingSticker(uid), clearStep(uid), clearEdit(uid),
-    clearReport(uid), takePendingDefPhoto(uid),
+    clearReport(uid), takePendingDefPhoto(uid), clearDmState(uid),
   ]).catch((e) => console.error("resetState error:", e));
 }
 
@@ -423,23 +427,46 @@ async function showAnonOptions(ctx: Context) {
   });
 }
 
-/** ورود به صف و اتصال (جستجوی شانسی) */
-async function startAnon(ctx: Context) {
-  const uid = ctx.from!.id;
-  await resetState(ctx); // ویس به متن / انتظار استیکر غیرفعال شود
 
-  // بدون پروفایل کامل اجازه‌ی چت ناشناس نیست
+const searchLabel = (o: SearchOpts) => {
+  const g =
+    o.gender === "m" ? "👦 جستجوی پسر" : o.gender === "f" ? "👧 جستجوی دختر" : "🎲 جستجوی شانسی";
+  const s = o.scope === "province" ? "🎎 هم استانی" : o.scope === "age" ? "👥 هم سنی" : null;
+  return s ? `${s} — ${g}` : g;
+};
+
+const searchingText = (o: SearchOpts) =>
+  ["🔎 درحال جستجوی مخاطب ناشناس شما", searchLabel(o), "", "⏳ حداکثر تا ۲ دقیقه صبر کنید."].join("\n");
+
+const noCoinsText = `💰 برای جستجو بر اساس جنسیت ${COINS.genderSearch} سکه لازم است و موجودی کافی نداری.\n<blockquote>سکه فقط وقتی کسر می‌شود که به کسی وصل شوی.</blockquote>`;
+
+/** ورود به صف و اتصال */
+async function startAnon(ctx: Context, opts: SearchOpts = RANDOM) {
+  const uid = ctx.from!.id;
+  await resetState(ctx);
+
   if (!(await ensureProfile(ctx, true))) return;
 
-  const r = await joinQueue(uid);
+  if (opts.gender && (await getCoins(uid)) < COINS.genderSearch) {
+    return void (await ctx.reply(noCoinsText, { ...HTML, reply_markup: idleKb }));
+  }
 
+  const r = await joinQueue(uid, opts);
+
+  if (r.status === "noprofile") {
+    await ensureProfile(ctx);
+    return;
+  }
+  if (r.status === "nocoins") {
+    return void (await ctx.reply(noCoinsText, { ...HTML, reply_markup: idleKb }));
+  }
   if (r.status === "chatting") {
     return void (await ctx.reply("الان وسط چت هستی. برای پایان «پایان چت» را بزن.", {
       reply_markup: chatKb,
     }));
   }
   if (r.status === "waiting") {
-    return void (await ctx.reply(ANON_SEARCHING, { reply_markup: cancelSearchKb }));
+    return void (await ctx.reply(searchingText(opts), { reply_markup: cancelSearchKb }));
   }
 
   // وصل شد: اول به طرف مقابل خبر بده؛ اگر ربات را بلاک کرده بود اتصال لغو می‌شود
@@ -452,6 +479,11 @@ async function startAnon(ctx: Context) {
     }));
   }
   await ctx.reply(ANON_MATCHED, { ...HTML, reply_markup: chatKb });
+  if (opts.gender) {
+    await ctx.reply(
+      `💰 ${COINS.genderSearch} سکه کسر شد. اگر چت زیر ۱ دقیقه تمام شود ${COINS.shortChatRefund} سکه برمی‌گردد.`
+    );
+  }
 }
 
 async function publicIdOf(userId: number) {
@@ -496,6 +528,9 @@ async function endAnon(ctx: Context) {
 
   await ctx.reply(endedText(partnerPid, chat.code, true), opts);
   await ctx.api.sendMessage(r.partnerId, endedText(myPid, chat.code, false), opts).catch(() => {});
+  const note = `↩️ چت زیر ۱ دقیقه تمام شد؛ ${COINS.shortChatRefund} سکه به حسابت برگشت.`;
+  if (r.refunded.includes(uid)) await ctx.reply(note).catch(() => {});
+  if (r.refunded.includes(r.partnerId)) await ctx.api.sendMessage(r.partnerId, note).catch(() => {});
 }
 
 // ---------- ساخت ربات ----------
@@ -525,7 +560,12 @@ export function getBot() {
 
   // ================= دستورهای عمومی =================
 
-  bot.command("start", showStart);
+  bot.command("start", async (ctx) => {
+    await resetState(ctx);
+    if (await handleStartPayload(ctx)) return;
+    await showStart(ctx);
+  });
+
   bot.command("menu", showHome);
 
   bot.command("help", async (ctx) => {
@@ -642,11 +682,17 @@ export function getBot() {
   });
 
 
+  bot.hears(BTN.link, async (ctx) => {
+    await resetState(ctx);
+    await sendMyLink(ctx);
+  });
+
   // دکمه‌های کیبورد پایین که هنوز بخشی پشتشان نیست
-  bot.hears([BTN.search, BTN.nearby, BTN.link, BTN.feedback], async (ctx) => {
+  bot.hears([BTN.search, BTN.nearby, BTN.feedback], async (ctx) => {
     await resetState(ctx);
     await ctx.reply("این بخش به‌زودی فعال می‌شود 🚧");
   });
+
 
   // دکمه‌های اینلاین پروفایل که هنوز بخشی پشتشان نیست
   bot.callbackQuery(/^pf:(?!edit$)/, async (ctx) => {
@@ -699,8 +745,44 @@ export function getBot() {
     await endAnon(ctx);
   });
 
-  // این‌ها به اطلاعات پروفایل (جنسیت، سن، استان، موقعیت) نیاز دارند
-  bot.callbackQuery(/^anon:(boy|girl|nearby|province|age)$/, async (ctx) => {
+
+  // جستجوی پسر / دختر (۲ سکه، فقط هنگام اتصال)
+  bot.callbackQuery(/^anon:(boy|girl)$/, async (ctx) => {
+    await ctx.answerCallbackQuery();
+    await ctx.deleteMessage().catch(() => {});
+    await startAnon(ctx, { scope: null, gender: ctx.match[1] === "boy" ? "m" : "f" });
+  });
+
+  // پنل دوم: هم‌استانی / هم‌سنی (شانسی رایگان، پسر/دختر ۲ سکه)
+  const subPanelKb = (k: "p" | "a") =>
+    new InlineKeyboard()
+      .text("🎲 جستجوی شانسی", `anon:${k}:r`)
+      .row()
+      .text("👱‍♂️ جستجوی پسر", `anon:${k}:b`)
+      .text("👩‍🦰 جستجوی دختر", `anon:${k}:g`);
+
+  bot.callbackQuery(/^anon:(province|age)$/, async (ctx) => {
+    await ctx.answerCallbackQuery();
+    const k = ctx.match[1] === "age" ? "a" : "p";
+    const who = k === "a" ? "هم سنی" : "هم استانی";
+    await editOrReply(
+      ctx,
+      `چه کسی رو از ${who} هات پیدا کنم؟ <code>انتخاب کن</code>👇`,
+      subPanelKb(k)
+    );
+  });
+
+  bot.callbackQuery(/^anon:(p|a):(r|b|g)$/, async (ctx) => {
+    await ctx.answerCallbackQuery();
+    await ctx.deleteMessage().catch(() => {});
+    const [, k, g] = ctx.match;
+    await startAnon(ctx, {
+      scope: k === "p" ? "province" : "age",
+      gender: g === "b" ? "m" : g === "g" ? "f" : null,
+    });
+  });
+
+  bot.callbackQuery("anon:nearby", async (ctx) => {
     await ctx.answerCallbackQuery({ text: "این بخش به‌زودی فعال می‌شود 🚧" });
   });
 
@@ -756,6 +838,7 @@ bot.on("message", async (ctx, next) => {
   }
 });
 
+registerAnonLink(bot);
 registerProfileEdit(bot);
 registerReports(bot);
 
