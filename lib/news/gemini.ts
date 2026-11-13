@@ -93,7 +93,7 @@ export async function searchNews(cat: NewsCategory, win: WindowId, maxItems = 6)
     const body = await res.text().catch(() => "");
     console.error("gemini news 429 (all keys):", body.slice(0, 4000));
     throw new UserError(
-      "⏳ سرویس خبر الان شلوغ است. چند دقیقه بعد دوباره امتحان کن. (سهمیه‌ات کسر نشد)"
+      "⏳ محدودیت سهمیه یا سرعت Gemini/جستجوی گوگل برای پروژه فعال شده است. این محدودیت به پروژه مربوط است، نه تعداد کاربران ربات. وضعیت سهمیه را در Google AI Studio بررسی کن. (سهمیه‌ات کسر نشد)"
     );
   }
   if (!res.ok) throw new Error(`gemini news http ${res.status}`);

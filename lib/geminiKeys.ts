@@ -2,8 +2,12 @@ const cooldown = new Map<string, number>();
 const COOLDOWN_MS = 10 * 60 * 1000; // کلیدی که 429 داد، ۱۰ دقیقه کنار می‌ماند
 
 export function geminiKeys(): string[] {
-  const raw = process.env.GEMINI_API_KEYS ?? process.env.GEMINI_API_KEY ?? "";
-  return raw.split(",").map((s) => s.trim()).filter(Boolean);
+  const configured = [process.env.GEMINI_API_KEYS, process.env.GEMINI_API_KEY];
+  return [
+    ...new Set(
+      configured.flatMap((raw) => (raw ?? "").split(",").map((s) => s.trim()).filter(Boolean))
+    ),
+  ];
 }
 
 /** درخواست به Gemini؛ روی 429 سراغ کلید بعدی می‌رود */
