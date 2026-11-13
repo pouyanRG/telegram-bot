@@ -1,10 +1,10 @@
 import { InlineKeyboard, Keyboard } from "grammy";
+import { ANONYMOUS_FEATURES_ENABLED } from "./config";
 
 export function mainMenu(isAdmin = false) {
-  const kb = new InlineKeyboard()
-    .text("💬 چت ناشناس", "menu:anon")
-    .row()
-    .text("💰 رمزارزها", "menu:prices")
+  const kb = new InlineKeyboard();
+  if (ANONYMOUS_FEATURES_ENABLED) kb.text("💬 چت ناشناس", "menu:anon").row();
+  kb.text("💰 رمزارزها", "menu:prices")
     .text("🎙 ویس به متن", "menu:voice")
     .row()
     .text("📰 خبر شخصی", "menu:news")
@@ -77,12 +77,14 @@ const b = (k: Key, style?: Btn["style"]): Btn => ({
 
 // ترتیب هر ردیف از چپ به راست است (چیدمان تلگرام)
 export const idleKb = {
-  keyboard: [
-    [b("connect", "success")],
-    [b("search"), b("nearby")],
-    [b("coins"), b("profile"), b("help")],
-    [b("link"), b("feedback")],
-  ],
+  keyboard: ANONYMOUS_FEATURES_ENABLED
+    ? [
+        [b("connect", "success")],
+        [b("search"), b("nearby")],
+        [b("coins"), b("profile"), b("help")],
+        [b("link"), b("feedback")],
+      ]
+    : [[b("coins"), b("profile"), b("help")], [b("feedback")]],
   resize_keyboard: true,
   is_persistent: true,
 };

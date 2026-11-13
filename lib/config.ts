@@ -1,5 +1,7 @@
 // ---------- قابلیت‌ها و سهمیه‌ی روزانه ----------
 
+export const ANONYMOUS_FEATURES_ENABLED = false;
+
 export const FEATURES = {
   assistant: { label: "دستیار شخصی", emoji: "🧠", limit: 10 },
   persona: { label: "شخصیت‌ها", emoji: "🎭", limit: 10 },

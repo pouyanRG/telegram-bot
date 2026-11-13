@@ -1,21 +1,31 @@
 import { UserError } from "./errors";
 import {
   formatNewsItem,
+  getNewsAlertsEnabled,
   getNewsFeed,
   getNewsSelection,
+  getNewsUserState,
+  markNewsRead,
+  setNewsAlertsEnabled,
   setNewsSelection,
+  toggleNewsFavorite,
   toggleNewsCategory,
   type NewsCategory,
   type NewsFeed,
   type NewsStory,
 } from "./news";
-import { Bot, GrammyError, InlineKeyboard, type Context } from "grammy";
+import { Bot, GrammyError, InlineKeyboard, Keyboard, type Context } from "grammy";
 import type { InlineKeyboardMarkup } from "grammy/types";
 import { checkRate, shouldWarn } from "./rateLimit";
 import { registerReports, clearReport, takePendingDefPhoto } from "./reports";
 import { sendPeerProfile } from "./peerProfile";
 import { registerProfileEdit, clearEdit } from "./profileEdit";
-import { SETTINGS, COINS, quotaExceededMessage } from "./config";
+import {
+  ANONYMOUS_FEATURES_ENABLED,
+  SETTINGS,
+  COINS,
+  quotaExceededMessage,
+} from "./config";
 import { registerAnonLink, handleStartPayload, sendMyLink, clearDmState } from "./anonLink";
 import { consumeQuota, refundQuota } from "./quota";
 import { getPrices, formatPrices, findCoin, formatCoin } from "./prices";
@@ -89,6 +99,11 @@ const RLM = "\u200F";
 // اسمی که در پیام «پروفایلت دیده شد» نشان داده می‌شود؛ اسم ربات خودت را بگذار
 const BOT_NAME = "ربات";
 
+const DISABLED_ANON_BUTTONS = new Set([
+  BTN.connect, BTN.search, BTN.nearby, BTN.link,
+  BTN.cancel, BTN.end, BTN.next, BTN.peer, BTN.safe,
+]);
+
 const WELCOME =
   "👋 <b>سلام!</b>\nاز منوی زیر انتخاب کن از کدام بخش می‌خواهی استفاده کنی:";
 
@@ -102,10 +117,13 @@ const HELP_USER = [
   "▫️ نام یا نماد هر ارز (مثل <code>btc</code> یا <code>solana</code> یا <code>بیت‌کوین</code>) را بفرست تا رمزارز را ببینی",
   "▫️ برای تبدیل ویس به متن، از منو «🎙 ویس به متن» را بزن و بعد ویس بفرست",
   "▫️ از منوی اصلی «📰 خبر شخصی» را بزن، دسته‌های دلخواهت را انتخاب کن و خبرها را بخوان",
-  "▫️ از منوی اصلی «💬 چت ناشناس» را انتخاب کن تا نوع جستجو را مشخص کنی",
-  "▫️ /end — پایان چت ناشناس",
-  "",
-  CHAT_INFO,
+  ...(ANONYMOUS_FEATURES_ENABLED
+    ? [
+        "▫️ از منوی اصلی «💬 چت ناشناس» را انتخاب کن تا نوع جستجو را مشخص کنی",
+        "▫️ /end — پایان چت ناشناس",
+        CHAT_INFO,
+      ]
+    : []),
   "",
   PROFILE_INFO,
   "",
@@ -248,7 +266,7 @@ const anonSearchKb: InlineKeyboardMarkup = {
   ],
 };
 
-function newsPreferencesKb(categories: NewsCategory[], selected: string[]) {
+function newsPreferencesKb(categories: NewsCategory[], selected: string[], alertsEnabled: boolean) {
   const kb = new InlineKeyboard();
   const active = new Set(selected);
   for (const category of categories) {
@@ -260,10 +278,16 @@ function newsPreferencesKb(categories: NewsCategory[], selected: string[]) {
       .text("☑️ انتخاب همه", "news:all")
       .row();
   }
+  kb.text("🆕 خبرهای جدید", "news:unread")
+    .text("⭐ ذخیره‌شده‌ها", "news:favorites")
+    .row()
+    .text("📚 خوانده‌شده‌ها", "news:history")
+    .text(`${alertsEnabled ? "🔔" : "🔕"} اعلان دسته‌های من`, "news:alerts")
+    .row();
   return kb.text("🏠 منوی اصلی", "menu:home");
 }
 
-function newsPreferencesText(feed: NewsFeed, selected: string[]) {
+function newsPreferencesText(feed: NewsFeed, selected: string[], alertsEnabled: boolean) {
   const updatedAt = new Date(feed.updatedAt).toLocaleTimeString("fa-IR", {
     timeZone: "Asia/Tehran",
     hour: "2-digit",
@@ -271,8 +295,8 @@ function newsPreferencesText(feed: NewsFeed, selected: string[]) {
   });
   return [
     "📰 <b>خبرهای شخصی</b>",
-    "یک یا چند دسته را انتخاب کن؛ انتخاب‌ها ذخیره می‌شوند و فقط خبرهای همان دسته‌ها را می‌بینی.",
-    `🌐 منبع: ایران‌اینترنشنال`,
+    "دسته‌های دلخواهت را انتخاب کن. خبرهای بازشده خوانده‌شده و خبرهای مهم را می‌توانی ذخیره کنی.",
+    `اعلان خودکار: ${alertsEnabled ? "روشن" : "خاموش"} برای دسته‌های انتخاب‌شده`,
     `🕒 آخرین دریافت فید: ${updatedAt}${feed.stale ? " (نسخهٔ ذخیره‌شده)" : ""}`,
     "",
     feed.categories.length
@@ -281,12 +305,12 @@ function newsPreferencesText(feed: NewsFeed, selected: string[]) {
   ].join("\n");
 }
 
-function newsCardKeyboard(index: number, total: number, url: string) {
+function newsCardKeyboard(index: number, total: number, storyId: string, isFavorite: boolean) {
   const kb = new InlineKeyboard();
   if (index > 0) kb.text("⬅️ قبلی", `news:view:${index - 1}`);
   if (index + 1 < total) kb.text("بعدی ➡️", `news:view:${index + 1}`);
   if (index > 0 || index + 1 < total) kb.row();
-  kb.url("🔗 متن کامل خبر", url)
+  kb.text(isFavorite ? "⭐ ذخیره‌شده" : "☆ ذخیره خبر", `news:favorite:${storyId}`)
     .row()
     .text("⚙️ انتخاب دسته‌ها", "menu:news")
     .text("🏠 منو", "menu:home");
@@ -338,6 +362,18 @@ async function menuFor(ctx: Context) {
   return mainMenu(!!uid && (await isAdminUser(uid)));
 }
 
+async function stopDisabledAnonSession(userId: number, ctx: Context) {
+  if (!(await getAnon(userId))) return;
+  const result = await leaveChat(userId);
+  if (result.was === "chatting" && result.partnerId) {
+    await ctx.api
+      .sendMessage(result.partnerId, "این بخش فعلاً در دسترس نیست.", { reply_markup: idleKb })
+      .catch((error) =>
+        console.warn("disabled chat partner notification failed:", error instanceof Error ? error.message : "unknown")
+      );
+  }
+}
+
 /** هر بار که کاربر در منو جابه‌جا می‌شود: ویس غیرفعال، حالت انتظار استیکر و مرحله‌ی نیمه‌کاره‌ی پروفایل لغو می‌شود */
 async function resetState(ctx: Context) {
   const uid = ctx.from?.id;
@@ -345,7 +381,12 @@ async function resetState(ctx: Context) {
   await Promise.all([
     clearMode(uid), takePendingSticker(uid), clearStep(uid), clearEdit(uid),
     clearReport(uid), takePendingDefPhoto(uid), clearDmState(uid),
+    ...(ANONYMOUS_FEATURES_ENABLED ? [] : [stopDisabledAnonSession(uid, ctx)]),
   ]).catch((e) => console.error("resetState error:", e));
+}
+
+async function clearLegacyReplyKeyboard(ctx: Context) {
+  await ctx.reply("✅ منو به‌روز شد.", { reply_markup: { remove_keyboard: true } });
 }
 
 // ---------- تکمیل پروفایل (جنسیت ← سن ← استان) ----------
@@ -396,9 +437,12 @@ async function sendPrices(ctx: Context) {
 }
 
 async function renderNewsPreferences(ctx: Context, feed: NewsFeed) {
-  const selected = await getNewsSelection(ctx.from!.id, feed.categories);
-  const text = newsPreferencesText(feed, selected);
-  const keyboard = newsPreferencesKb(feed.categories, selected);
+  const [selected, alertsEnabled] = await Promise.all([
+    getNewsSelection(ctx.from!.id, feed.categories),
+    getNewsAlertsEnabled(ctx.from!.id),
+  ]);
+  const text = newsPreferencesText(feed, selected, alertsEnabled);
+  const keyboard = newsPreferencesKb(feed.categories, selected, alertsEnabled);
   const message = ctx.callbackQuery?.message;
   if (message && "photo" in message && message.photo?.length) {
     await ctx.deleteMessage();
@@ -406,6 +450,23 @@ async function renderNewsPreferences(ctx: Context, feed: NewsFeed) {
     return;
   }
   await editOrReply(ctx, text, keyboard);
+}
+
+async function showNewsList(ctx: Context, title: string, stories: NewsStory[]) {
+  if (!stories.length) {
+    await editOrReply(
+      ctx,
+      `${title}\n\nفعلاً خبری در این فهرست نیست.`,
+      new InlineKeyboard().text("⚙️ خبرها و دسته‌ها", "menu:news").text("🏠 منو", "menu:home")
+    );
+    return;
+  }
+  const keyboard = new InlineKeyboard();
+  for (const story of stories.slice(0, 12)) {
+    keyboard.text(Array.from(story.title).slice(0, 54).join(""), `news:open:${story.id}`).row();
+  }
+  keyboard.text("⚙️ خبرها و دسته‌ها", "menu:news").text("🏠 منو", "menu:home");
+  await editOrReply(ctx, title, keyboard);
 }
 
 async function reportNewsError(ctx: Context, error: unknown) {
@@ -429,7 +490,9 @@ async function showNewsCard(
   const caption = feed.stale
     ? `${body}\n\n⚠️ فید موقتاً به‌روز نشد؛ این خبر از نسخهٔ ذخیره‌شده است.`
     : body;
-  const keyboard = newsCardKeyboard(index, stories.length, story.url);
+  const userId = ctx.from!.id;
+  const state = await getNewsUserState(userId);
+  const keyboard = newsCardKeyboard(index, stories.length, story.id, state.favoriteIds.includes(story.id));
   const message = ctx.callbackQuery?.message;
   const hasPhoto = !!message && "photo" in message && !!message.photo?.length;
 
@@ -452,6 +515,7 @@ async function showNewsCard(
     await ctx.deleteMessage();
     await sendNewsCard(ctx, story, caption, keyboard);
   }
+  await markNewsRead(userId, story.id);
 }
 
 async function sendNewsCard(
@@ -486,6 +550,7 @@ async function bottomKeyboardFor(ctx: Context) {
 /** /menu و دکمه‌ی «📋 منو»: منوی اینلاین اصلی */
 async function showHome(ctx: Context) {
   await resetState(ctx);
+  await clearLegacyReplyKeyboard(ctx);
   await ctx.reply(WELCOME, { ...HTML, reply_markup: await menuFor(ctx) });
 }
 
@@ -639,12 +704,44 @@ export function getBot() {
   bot.use(dedupeUpdates);
   bot.use(userGuard);
   bot.use(throttle);
+  bot.use(async (ctx, next) => {
+    if (ANONYMOUS_FEATURES_ENABLED) return next();
+
+    if (ctx.callbackQuery && ctx.from) {
+      await stopDisabledAnonSession(ctx.from.id, ctx);
+    }
+
+    const callback = ctx.callbackQuery?.data;
+    if (
+      callback &&
+      (callback === "menu:anon" || /^(anon:|dm:|pp:(?:dm|chat|notify):)/.test(callback))
+    ) {
+      await ctx.answerCallbackQuery({ text: "این بخش فعلاً در دسترس نیست." }).catch(() => {});
+      await ctx.deleteMessage().catch(() => {});
+      await clearLegacyReplyKeyboard(ctx);
+      await ctx.reply(WELCOME, { ...HTML, reply_markup: await menuFor(ctx) });
+      return;
+    }
+
+    const input = ctx.message?.text?.trim();
+    if (
+      input &&
+      (DISABLED_ANON_BUTTONS.has(input) ||
+        /^\/(?:end|delet_chat_[a-z0-9]{5})(?:@\w+)?(?:\s|$)/i.test(input))
+    ) {
+      await stopDisabledAnonSession(ctx.from!.id, ctx);
+      await ctx.reply("این گزینه در منوی فعلی وجود ندارد.", { reply_markup: idleKb });
+      return;
+    }
+    await next();
+  });
 
   // ================= دستورهای عمومی =================
 
   bot.command("start", async (ctx) => {
     await resetState(ctx);
-    if (await handleStartPayload(ctx)) return;
+    if (ANONYMOUS_FEATURES_ENABLED && (await handleStartPayload(ctx))) return;
+    await clearLegacyReplyKeyboard(ctx);
     await ctx.reply(WELCOME, { ...HTML, reply_markup: await menuFor(ctx) });
   });
 
@@ -652,6 +749,7 @@ export function getBot() {
 
   bot.command("help", async (ctx) => {
     await resetState(ctx);
+    await clearLegacyReplyKeyboard(ctx);
     const id = ctx.from?.id;
     let text = HELP_USER;
     if (id && (await isAdminUser(id))) text += "\n" + HELP_ADMIN;
@@ -728,6 +826,7 @@ export function getBot() {
   bot.hears(BTN.menu, showHome);
   bot.hears(BTN.help, async (ctx) => {
     await resetState(ctx);
+    await clearLegacyReplyKeyboard(ctx);
     await ctx.reply(HELP_USER, { ...HTML, reply_markup: homeKb });
   });
 
@@ -764,10 +863,12 @@ export function getBot() {
   });
 
 
-  bot.hears(BTN.link, async (ctx) => {
-    await resetState(ctx);
-    await sendMyLink(ctx);
-  });
+  if (ANONYMOUS_FEATURES_ENABLED) {
+    bot.hears(BTN.link, async (ctx) => {
+      await resetState(ctx);
+      await sendMyLink(ctx);
+    });
+  }
 
   // دکمه‌های کیبورد پایین که هنوز بخشی پشتشان نیست
   bot.hears([BTN.search, BTN.nearby, BTN.feedback], async (ctx) => {
@@ -876,6 +977,18 @@ bot.on("message", async (ctx, next) => {
   if (ctx.message.text?.startsWith("/")) return next();
 
   const a = await getAnon(ctx.from.id);
+  if (!ANONYMOUS_FEATURES_ENABLED && a) {
+    const result = await leaveChat(ctx.from.id);
+    if (result.was === "chatting" && result.partnerId) {
+      await ctx.api
+        .sendMessage(result.partnerId, "این بخش فعلاً در دسترس نیست.", { reply_markup: idleKb })
+        .catch((error) =>
+          console.warn("disabled chat partner notification failed:", error instanceof Error ? error.message : "unknown")
+        );
+    }
+    await ctx.reply("این بخش فعلاً در دسترس نیست.", { reply_markup: idleKb });
+    return;
+  }
   if (a?.state !== "chatting" || !a.partnerId) return next();
 
   // محدودیت سخت‌گیرانه برای ارسال پیام به طرف مقابل
@@ -920,7 +1033,7 @@ bot.on("message", async (ctx, next) => {
   }
 });
 
-registerAnonLink(bot);
+if (ANONYMOUS_FEATURES_ENABLED) registerAnonLink(bot);
 registerProfileEdit(bot);
 registerReports(bot);
 
@@ -968,7 +1081,9 @@ registerReports(bot);
     await ctx.reply(
       "✅ پروفایلت کامل شد!" +
         (reward ? `\n🎁 ${reward} سکه هدیه گرفتی.` : "") +
-        "\nحالا می‌تونی «💬 به یه ناشناس وصلم کن!» رو بزنی.",
+        (ANONYMOUS_FEATURES_ENABLED
+          ? "\nحالا می‌تونی «💬 به یه ناشناس وصلم کن!» رو بزنی."
+          : ""),
       { reply_markup: idleKb }
     );
   });
@@ -1097,6 +1212,7 @@ registerReports(bot);
   bot.callbackQuery("menu:home", async (ctx) => {
     await ctx.answerCallbackQuery();
     await resetState(ctx);
+    await clearLegacyReplyKeyboard(ctx);
     const message = ctx.callbackQuery.message;
     if (message && "photo" in message && message.photo?.length) {
       await ctx.deleteMessage();
@@ -1106,14 +1222,17 @@ registerReports(bot);
     await editOrReply(ctx, WELCOME, await menuFor(ctx));
   });
 
-  bot.callbackQuery("menu:anon", async (ctx) => {
-    await ctx.answerCallbackQuery();
-    await showAnonOptions(ctx);
-  });
+  if (ANONYMOUS_FEATURES_ENABLED) {
+    bot.callbackQuery("menu:anon", async (ctx) => {
+      await ctx.answerCallbackQuery();
+      await showAnonOptions(ctx);
+    });
+  }
 
   bot.callbackQuery("menu:help", async (ctx) => {
     await ctx.answerCallbackQuery();
     await resetState(ctx);
+    await clearLegacyReplyKeyboard(ctx);
     await editOrReply(ctx, HELP_USER, homeKb);
   });
 
@@ -1204,17 +1323,116 @@ registerReports(bot);
       const selected = new Set(await getNewsSelection(ctx.from.id, feed.categories));
       const stories = feed.stories.filter((story) => selected.has(story.categoryId));
       if (!selected.size) {
-        await editOrReply(ctx, "اول دست‌کم یک دسته را انتخاب کن:", newsPreferencesKb(feed.categories, []));
+        await renderNewsPreferences(ctx, feed);
       } else if (!stories.length) {
-        await editOrReply(
-          ctx,
-          "در دسته‌های انتخاب‌شده فعلاً خبری در فید نیست.",
-          newsPreferencesKb(feed.categories, [...selected])
-        );
+        await editOrReply(ctx, "در دسته‌های انتخاب‌شده فعلاً خبری در فید نیست.", new InlineKeyboard()
+          .text("⚙️ انتخاب دسته‌ها", "menu:news")
+          .text("🏠 منو", "menu:home"));
       } else {
         await showNewsCard(ctx, feed, stories, 0);
       }
     } catch (error) {
+      await reportNewsError(ctx, error);
+    }
+  });
+
+  bot.callbackQuery("news:unread", async (ctx) => {
+    await ctx.answerCallbackQuery();
+    try {
+      const feed = await getNewsFeed();
+      const selected = new Set(await getNewsSelection(ctx.from.id, feed.categories));
+      const state = await getNewsUserState(ctx.from.id);
+      if (!selected.size) {
+        await renderNewsPreferences(ctx, feed);
+        return;
+      }
+      const stories = feed.stories.filter(
+        (story) => selected.has(story.categoryId) && !state.readIds.includes(story.id)
+      );
+      await showNewsList(ctx, "🆕 <b>خبرهای جدید و خوانده‌نشده</b>", stories);
+    } catch (error) {
+      await reportNewsError(ctx, error);
+    }
+  });
+
+  bot.callbackQuery("news:favorites", async (ctx) => {
+    await ctx.answerCallbackQuery();
+    try {
+      const [feed, state] = await Promise.all([getNewsFeed(), getNewsUserState(ctx.from.id)]);
+      await showNewsList(
+        ctx,
+        "⭐ <b>خبرهای ذخیره‌شده</b>",
+        feed.stories.filter((story) => state.favoriteIds.includes(story.id))
+      );
+    } catch (error) {
+      await reportNewsError(ctx, error);
+    }
+  });
+
+  bot.callbackQuery("news:history", async (ctx) => {
+    await ctx.answerCallbackQuery();
+    try {
+      const [feed, state] = await Promise.all([getNewsFeed(), getNewsUserState(ctx.from.id)]);
+      await showNewsList(
+        ctx,
+        "📚 <b>خبرهای خوانده‌شده</b>",
+        feed.stories.filter((story) => state.readIds.includes(story.id))
+      );
+    } catch (error) {
+      await reportNewsError(ctx, error);
+    }
+  });
+
+  bot.callbackQuery(/^news:open:([a-f0-9]{16})$/, async (ctx) => {
+    await ctx.answerCallbackQuery();
+    try {
+      const feed = await getNewsFeed();
+      const story = feed.stories.find((item) => item.id === ctx.match[1]);
+      if (!story) {
+        await renderNewsPreferences(ctx, feed);
+        return;
+      }
+      await showNewsCard(ctx, feed, [story], 0);
+    } catch (error) {
+      await reportNewsError(ctx, error);
+    }
+  });
+
+  bot.callbackQuery(/^news:favorite:([a-f0-9]{16})$/, async (ctx) => {
+    try {
+      const feed = await getNewsFeed();
+      const story = feed.stories.find((item) => item.id === ctx.match[1]);
+      if (!story) {
+        await ctx.answerCallbackQuery({ text: "خبر دیگر در فهرست نیست." });
+        await renderNewsPreferences(ctx, feed);
+        return;
+      }
+      const favorited = await toggleNewsFavorite(ctx.from.id, story.id);
+      await ctx.answerCallbackQuery({ text: favorited ? "خبر ذخیره شد ⭐" : "از ذخیره‌ها حذف شد" });
+      await showNewsCard(ctx, feed, [story], 0);
+    } catch (error) {
+      await ctx.answerCallbackQuery().catch(() => {});
+      await reportNewsError(ctx, error);
+    }
+  });
+
+  bot.callbackQuery("news:alerts", async (ctx) => {
+    try {
+      const feed = await getNewsFeed();
+      const selected = await getNewsSelection(ctx.from.id, feed.categories);
+      const enabled = await getNewsAlertsEnabled(ctx.from.id);
+      if (!enabled && !selected.length) {
+        await ctx.answerCallbackQuery({ text: "اول یک یا چند دسته را انتخاب کن.", show_alert: true });
+        await renderNewsPreferences(ctx, feed);
+        return;
+      }
+      await setNewsAlertsEnabled(ctx.from.id, !enabled);
+      await ctx.answerCallbackQuery({
+        text: enabled ? "اعلان خودکار خاموش شد." : "اعلان برای دسته‌های انتخاب‌شده روشن شد.",
+      });
+      await renderNewsPreferences(ctx, feed);
+    } catch (error) {
+      await ctx.answerCallbackQuery().catch(() => {});
       await reportNewsError(ctx, error);
     }
   });

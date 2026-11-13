@@ -2,7 +2,7 @@ import { and, count, eq } from "drizzle-orm";
 import { InlineKeyboard, Keyboard, type Bot, type Context } from "grammy";
 import { getDb } from "./db";
 import { bans, cache, reports, users } from "./schema";
-import { COINS } from "./config";
+import { ANONYMOUS_FEATURES_ENABLED, COINS } from "./config";
 import { addCoins } from "./coins";
 import { findLastChatBetween, getAnon, snapshotChat } from "./anon";
 import { isAdminUser, ownerId } from "./admins";
@@ -18,7 +18,9 @@ const REPORT_BACK = "🔙 بازگشت";
 
 const REASONS = [
   { btn: "تبلیغات سایت ها و ربات ها و کانال ها", why: "تبلیغات سایت‌ها و ربات‌ها و کانال‌ها" },
-  { btn: "ارسال محتوای غیراخلاقی در چت", why: "ارسال محتوای غیراخلاقی در چت" },
+  ...(ANONYMOUS_FEATURES_ENABLED
+    ? [{ btn: "ارسال محتوای غیراخلاقی در چت", why: "ارسال محتوای غیراخلاقی در چت" }]
+    : []),
   { btn: "ایجاد مزاحمت", why: "ایجاد مزاحمت" },
   { btn: "پخش شماره موبایل یا اطلاعات شخصی دیگران", why: "پخش شماره موبایل یا اطلاعات شخصی دیگران" },
   { btn: "کلمات یا عکس غیر اخلاقی و یا توهین آمیز در پروفایل", why: "کلمات یا عکس غیر اخلاقی و یا توهین آمیز در پروفایل" },
@@ -143,7 +145,7 @@ export function registerReports(bot: Bot) {
     const me = ctx.from.id;
     const target = Number(ctx.match[1]);
 
-    if ((await getAnon(me))?.state === "chatting") {
+    if (ANONYMOUS_FEATURES_ENABLED && (await getAnon(me))?.state === "chatting") {
       return void (await ctx.reply(CHATTING_ERR, { ...HTML, ...quoteMsg(ctx) }));
     }
     if (target === me) return void (await ctx.reply("خودت را نمی‌توانی گزارش کنی 😅"));
@@ -175,7 +177,7 @@ export function registerReports(bot: Bot) {
     if (!reason) return void (await ctx.answerCallbackQuery());
     await ctx.answerCallbackQuery();
 
-    if ((await getAnon(me))?.state === "chatting") {
+    if (ANONYMOUS_FEATURES_ENABLED && (await getAnon(me))?.state === "chatting") {
       return void (await ctx.reply(CHATTING_ERR, HTML));
     }
 
@@ -187,7 +189,9 @@ export function registerReports(bot: Bot) {
         `⚠️ فرم ارسال گزارش عدم رعایت قوانین به دلیل ${reason.why}`,
         "",
         "<code>خب حالا کافیه یه توضیح دقیق و 《کامل》 درباره گزارشت بفرستی تا ثبتش کنم.</code>",
-        "<code>- مثلا : داره تبلیغات فلان کانال رو توی چت ( یا پروفایلش ) میکنه.</code>",
+        ANONYMOUS_FEATURES_ENABLED
+          ? "<code>- مثلا : داره تبلیغات فلان کانال رو توی چت ( یا پروفایلش ) میکنه.</code>"
+          : "<code>- مثلا : داره تبلیغات فلان کانال رو توی پروفایلش میکنه.</code>",
         "",
         `برای لغو گزارش 《 ${REPORT_BACK} 》 را انتخاب کنید 👇`,
       ].join("\n"),

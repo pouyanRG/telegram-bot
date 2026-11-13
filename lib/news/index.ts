@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { XMLParser } from "fast-xml-parser";
-import { eq } from "drizzle-orm";
+import { eq, like } from "drizzle-orm";
 import { UserError } from "../errors";
 import { getDb } from "../db";
 import { cache } from "../schema";
@@ -8,6 +8,8 @@ import { cache } from "../schema";
 const FEED_URL = "https://www.iranintl.com/feed";
 const FEED_CACHE_KEY = "news:rss:iranintl:v1";
 const PREFERENCES_KEY = (userId: number) => `news-pref:iranintl:${userId}`;
+const USER_STATE_KEY = (userId: number) => `news-state:iranintl:${userId}`;
+const ALERT_CURSOR_KEY = "news:alerts:cursor:v1";
 const FEED_TTL_MS = 12 * 60_000;
 const MAX_STORIES = 100;
 const DEFAULT_CATEGORY = "بدون دسته‌بندی";
@@ -32,6 +34,11 @@ export type NewsFeed = {
 };
 
 type CachedFeed = Pick<NewsFeed, "stories" | "categories">;
+export type NewsUserState = {
+  favoriteIds: string[];
+  readIds: string[];
+  deliveredIds: string[];
+};
 type XmlRecord = Record<string, unknown>;
 
 const parser = new XMLParser({
@@ -197,10 +204,10 @@ function isCachedFeed(value: unknown): value is CachedFeed {
   return Array.isArray(data.stories) && Array.isArray(data.categories);
 }
 
-async function loadNewsFeed(): Promise<NewsFeed> {
+async function loadNewsFeed(forceRefresh = false): Promise<NewsFeed> {
   const [row] = await getDb().select().from(cache).where(eq(cache.key, FEED_CACHE_KEY));
   const cached = isCachedFeed(row?.data) ? row.data : null;
-  if (cached && Date.now() - row.updatedAt.getTime() < FEED_TTL_MS) {
+  if (!forceRefresh && cached && Date.now() - row.updatedAt.getTime() < FEED_TTL_MS) {
     return { ...cached, updatedAt: row.updatedAt.toISOString(), stale: false };
   }
 
@@ -220,7 +227,7 @@ async function loadNewsFeed(): Promise<NewsFeed> {
     if (cached && row) {
       return { ...cached, updatedAt: row.updatedAt.toISOString(), stale: true };
     }
-    throw new UserError("فید خبر ایران‌اینترنشنال فعلاً در دسترس نیست. کمی بعد دوباره امتحان کن.");
+    throw new UserError("فعلاً نمی‌توانم خبرها را دریافت کنم. کمی بعد دوباره امتحان کن.");
   }
 
   const now = new Date();
@@ -241,20 +248,126 @@ export function getNewsFeed() {
   return request;
 }
 
+export async function refreshNewsFeed() {
+  return loadNewsFeed(true);
+}
+
+export async function getNewsAlertCursor(): Promise<string[] | null> {
+  const [row] = await getDb().select().from(cache).where(eq(cache.key, ALERT_CURSOR_KEY));
+  const ids = (row?.data as { ids?: unknown } | undefined)?.ids;
+  return Array.isArray(ids) ? ids.filter((id): id is string => typeof id === "string") : null;
+}
+
+export async function setNewsAlertCursor(ids: string[]) {
+  const data = { ids: [...new Set(ids)].slice(0, MAX_STORIES) };
+  await getDb()
+    .insert(cache)
+    .values({ key: ALERT_CURSOR_KEY, data })
+    .onConflictDoUpdate({ target: cache.key, set: { data, updatedAt: new Date() } });
+}
+
+function validIds(value: unknown, limit: number) {
+  if (!Array.isArray(value)) return [];
+  return [...new Set(value.filter((id): id is string => typeof id === "string" && /^[a-f0-9]{16}$/.test(id)))]
+    .slice(-limit);
+}
+
+export async function getNewsUserState(userId: number): Promise<NewsUserState> {
+  const [row] = await getDb().select().from(cache).where(eq(cache.key, USER_STATE_KEY(userId)));
+  const data = row?.data as Partial<NewsUserState> | undefined;
+  return {
+    favoriteIds: validIds(data?.favoriteIds, 100),
+    readIds: validIds(data?.readIds, 300),
+    deliveredIds: validIds(data?.deliveredIds, 500),
+  };
+}
+
+async function updateNewsUserState(userId: number, update: (state: NewsUserState) => NewsUserState) {
+  const data = update(await getNewsUserState(userId));
+  await getDb()
+    .insert(cache)
+    .values({ key: USER_STATE_KEY(userId), data })
+    .onConflictDoUpdate({ target: cache.key, set: { data, updatedAt: new Date() } });
+  return data;
+}
+
+export async function markNewsRead(userId: number, storyId: string) {
+  await updateNewsUserState(userId, (state) => ({
+    ...state,
+    readIds: validIds([...state.readIds, storyId], 300),
+  }));
+}
+
+export async function toggleNewsFavorite(userId: number, storyId: string) {
+  let favorited = false;
+  await updateNewsUserState(userId, (state) => {
+    const favorites = new Set(state.favoriteIds);
+    if (favorites.has(storyId)) favorites.delete(storyId);
+    else favorites.add(storyId);
+    favorited = favorites.has(storyId);
+    return { ...state, favoriteIds: validIds([...favorites], 100) };
+  });
+  return favorited;
+}
+
+export async function markNewsDelivered(userId: number, storyId: string) {
+  await updateNewsUserState(userId, (state) => ({
+    ...state,
+    deliveredIds: validIds([...state.deliveredIds, storyId], 500),
+  }));
+}
+
+export async function getNewsAlertSubscribers() {
+  const rows = await getDb().select().from(cache).where(like(cache.key, "news-pref:iranintl:%"));
+  return rows.flatMap((row) => {
+    const match = /^news-pref:iranintl:(\d+)$/.exec(row.key);
+    const data = row.data as { selected?: unknown; alertsEnabled?: unknown };
+    const userId = match ? Number(match[1]) : NaN;
+    if (!Number.isSafeInteger(userId) || userId <= 0 || data.alertsEnabled !== true) return [];
+    const selected = validCategoryIds(data.selected);
+    return selected.length ? [{ userId, selected }] : [];
+  });
+}
+
+function validCategoryIds(value: unknown) {
+  if (!Array.isArray(value)) return [];
+  return [...new Set(value.filter((id): id is string => typeof id === "string" && /^[a-f0-9]{12}$/.test(id)))];
+}
+
+async function getPreferences(userId: number) {
+  const [row] = await getDb().select().from(cache).where(eq(cache.key, PREFERENCES_KEY(userId)));
+  return (row?.data as { selected?: unknown; alertsEnabled?: unknown } | undefined) ?? {};
+}
+
 export async function getNewsSelection(userId: number, categories: NewsCategory[]) {
-  const [row] = await getDb()
-    .select()
-    .from(cache)
-    .where(eq(cache.key, PREFERENCES_KEY(userId)));
   const available = new Set(categories.map((category) => category.id));
-  const data = row?.data as { selected?: unknown } | undefined;
+  const data = await getPreferences(userId);
   if (!Array.isArray(data?.selected)) return [];
   return data.selected.filter((id): id is string => typeof id === "string" && available.has(id));
 }
 
 export async function setNewsSelection(userId: number, selected: string[], categories: NewsCategory[]) {
   const allowed = new Set(categories.map((category) => category.id));
-  const data = { selected: [...new Set(selected.filter((id) => allowed.has(id)))] };
+  const previous = await getPreferences(userId);
+  const nextSelection = [...new Set(selected.filter((id) => allowed.has(id)))];
+  const data = {
+    selected: nextSelection,
+    alertsEnabled: nextSelection.length > 0 && previous.alertsEnabled === true,
+  };
+  await getDb()
+    .insert(cache)
+    .values({ key: PREFERENCES_KEY(userId), data })
+    .onConflictDoUpdate({ target: cache.key, set: { data, updatedAt: new Date() } });
+}
+
+export async function getNewsAlertsEnabled(userId: number) {
+  return (await getPreferences(userId)).alertsEnabled === true;
+}
+
+export async function setNewsAlertsEnabled(userId: number, enabled: boolean) {
+  const previous = await getPreferences(userId);
+  const selected = validCategoryIds(previous.selected);
+  const data = { selected, alertsEnabled: enabled };
   await getDb()
     .insert(cache)
     .values({ key: PREFERENCES_KEY(userId), data })
