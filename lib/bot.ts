@@ -81,13 +81,10 @@ const RLM = "\u200F";
 // اسمی که در پیام «پروفایلت دیده شد» نشان داده می‌شود؛ اسم ربات خودت را بگذار
 const BOT_NAME = "ربات";
 
-const WELCOME = "👋 <b>سلام!</b>\nیکی از بخش‌های زیر را انتخاب کن:";
+const WELCOME =
+  "👋 <b>سلام!</b>\nاز منوی زیر انتخاب کن از کدام بخش می‌خواهی استفاده کنی:";
 
-// پیام /start برای کاربری که پروفایلش کامل است (همراه کیبورد ثابت پایین)
-const START_TEXT =
-  "خب ، حالا چه کاری برات انجام بدم؟\n<code>از منوی پایین👇 انتخاب کن</code>";
-
-const SETTINGS_TEXT = "⚙️ <b>Setting</b>\nیکی از گزینه‌ها را انتخاب کن:";
+const SETTINGS_TEXT = "⚙️ <b>تنظیمات</b>\nیکی از گزینه‌ها را انتخاب کن:";
 
 const HELP_USER = [
   "ℹ️ <b>راهنما</b>",
@@ -96,7 +93,7 @@ const HELP_USER = [
   "▫️ /prices — وضعیت بازار و ‌ها",
   "▫️ نام یا نماد هر ارز (مثل <code>btc</code> یا <code>solana</code> یا <code>بیت‌کوین</code>) را بفرست تا رمزارز را ببینی",
   "▫️ برای تبدیل ویس به متن، از منو «🎙 ویس به متن» را بزن و بعد ویس بفرست",
-  "▫️ «💬 به یه ناشناس وصلم کن!» — چت ناشناس با یک نفر دیگر",
+  "▫️ از منوی اصلی «💬 چت ناشناس» را انتخاب کن تا نوع جستجو را مشخص کنی",
   "▫️ /end — پایان چت ناشناس",
   "",
   CHAT_INFO,
@@ -109,7 +106,7 @@ const HELP_USER = [
 const HELP_ADMIN = [
   "",
   "🛠 <b>بخش ادمین</b>",
-  "▫️ منو ← «⚙️ Setting» — تنظیمات ادمین (مثل استیکر فکرکردن)",
+  "▫️ منو ← «⚙️ تنظیمات» — تنظیمات ادمین (مثل استیکر فکرکردن)",
   "▫️ بخش «📰 خبر شخصی» فقط برای ادمین‌ها فعال است",
 ].join("\n");
 
@@ -239,6 +236,7 @@ const anonSearchKb: InlineKeyboardMarkup = {
       { text: "🎎 جستجوی هم استانی", callback_data: "anon:province" },
       { text: "👥 جستجوی هم سنی", callback_data: "anon:age" },
     ],
+    [{ text: "⬅️ بازگشت به منوی اصلی", callback_data: "menu:home" }],
   ],
 };
 
@@ -312,7 +310,7 @@ function parseId(raw: unknown) {
   return Number.isSafeInteger(n) && n > 0 ? n : null;
 }
 
-/** منوی اصلی؛ برای ادمین‌ها دکمه‌ی خبر و Setting هم دارد */
+/** منوی اصلی؛ گزینه‌های مدیریتی فقط برای ادمین‌ها نمایش داده می‌شوند */
 async function menuFor(ctx: Context) {
   const uid = ctx.from?.id;
   return mainMenu(!!uid && (await isAdminUser(uid)));
@@ -383,20 +381,10 @@ async function bottomKeyboardFor(ctx: Context) {
   return a?.state === "chatting" ? chatKb : a?.state === "waiting" ? waitingKb : idleKb;
 }
 
-/** /start: اگر پروفایل ناقص باشد جریان پروفایل شروع می‌شود؛ وگرنه یک پیام کوتاه همراه کیبورد ثابت پایین */
-async function showStart(ctx: Context) {
-  await resetState(ctx);
-  if (!(await ensureProfile(ctx))) return;
-  await ctx.reply(START_TEXT, { ...HTML, reply_markup: await bottomKeyboardFor(ctx) });
-}
-
 /** /menu و دکمه‌ی «📋 منو»: منوی اینلاین اصلی */
 async function showHome(ctx: Context) {
   await resetState(ctx);
   await ctx.reply(WELCOME, { ...HTML, reply_markup: await menuFor(ctx) });
-  await ctx.reply("👇 از دکمه‌های پایین هم می‌توانی استفاده کنی.", {
-    reply_markup: await bottomKeyboardFor(ctx),
-  });
 }
 
 // ---------- چت ناشناس ----------
@@ -422,7 +410,9 @@ async function showAnonOptions(ctx: Context) {
     ...HTML,
     ...NO_PREVIEW,
     // ریپلای روی پیام کاربر
-    reply_parameters: { message_id: ctx.message!.message_id },
+    ...(ctx.message?.message_id
+      ? { reply_parameters: { message_id: ctx.message.message_id } }
+      : {}),
     reply_markup: anonSearchKb,
   });
 }
@@ -563,7 +553,7 @@ export function getBot() {
   bot.command("start", async (ctx) => {
     await resetState(ctx);
     if (await handleStartPayload(ctx)) return;
-    await showStart(ctx);
+    await ctx.reply(WELCOME, { ...HTML, reply_markup: await menuFor(ctx) });
   });
 
   bot.command("menu", showHome);
@@ -975,7 +965,7 @@ registerReports(bot);
 
     // به ادمین جدید خبر بده (اگر قبلاً ربات را استارت کرده باشد)
     const notified = await ctx.api
-      .sendMessage(id, "🛠 شما به‌عنوان ادمین ربات اضافه شدید. برای دیدن «⚙️ Setting» یک بار /start بزنید.")
+      .sendMessage(id, "🛠 شما به‌عنوان ادمین ربات اضافه شدید. برای دیدن «⚙️ تنظیمات» یک بار /start بزنید.")
       .then(() => true)
       .catch(() => false);
 
@@ -1016,6 +1006,11 @@ registerReports(bot);
     await ctx.answerCallbackQuery();
     await resetState(ctx);
     await editOrReply(ctx, WELCOME, await menuFor(ctx));
+  });
+
+  bot.callbackQuery("menu:anon", async (ctx) => {
+    await ctx.answerCallbackQuery();
+    await showAnonOptions(ctx);
   });
 
   bot.callbackQuery("menu:help", async (ctx) => {
