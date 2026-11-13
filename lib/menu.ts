@@ -5,9 +5,11 @@ export function mainMenu(isAdmin = false) {
   const kb = new InlineKeyboard();
   if (ANONYMOUS_FEATURES_ENABLED) kb.text("💬 چت ناشناس", "menu:anon").row();
   kb.text("💰 رمزارزها", "menu:prices")
+    .row()
     .text("🎙 ویس به متن", "menu:voice")
     .row()
-    .text("📰 خبر شخصی", "menu:news")
+    .text("📰 اخبار روز", "menu:news")
+    .row()
     .text("ℹ️ راهنما", "menu:help");
 
   if (isAdmin) kb.row().text("⚙️ تنظیمات", "menu:settings");

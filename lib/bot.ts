@@ -1,7 +1,9 @@
 import { UserError } from "./errors";
 import {
+  beginNewsCategoryDraft,
   formatNewsItem,
   getNewsAlertsEnabled,
+  getNewsCategoryDraft,
   getNewsFeed,
   getNewsSelection,
   getNewsUserState,
@@ -9,7 +11,7 @@ import {
   setNewsAlertsEnabled,
   setNewsSelection,
   toggleNewsFavorite,
-  toggleNewsCategory,
+  toggleNewsCategoryDraft,
   type NewsCategory,
   type NewsFeed,
   type NewsStory,
@@ -116,7 +118,7 @@ const HELP_USER = [
   "▫️ /prices — وضعیت بازار و ‌ها",
   "▫️ نام یا نماد هر ارز (مثل <code>btc</code> یا <code>solana</code> یا <code>بیت‌کوین</code>) را بفرست تا رمزارز را ببینی",
   "▫️ برای تبدیل ویس به متن، از منو «🎙 ویس به متن» را بزن و بعد ویس بفرست",
-  "▫️ از منوی اصلی «📰 خبر شخصی» را بزن، دسته‌های دلخواهت را انتخاب کن و خبرها را بخوان",
+  "▫️ از منوی اصلی «📰 اخبار روز» را بزن، دسته‌های دلخواهت را انتخاب کن و خبرها را بخوان",
   ...(ANONYMOUS_FEATURES_ENABLED
     ? [
         "▫️ از منوی اصلی «💬 چت ناشناس» را انتخاب کن تا نوع جستجو را مشخص کنی",
@@ -266,42 +268,56 @@ const anonSearchKb: InlineKeyboardMarkup = {
   ],
 };
 
-function newsPreferencesKb(categories: NewsCategory[], selected: string[], alertsEnabled: boolean) {
+function newsHomeKb() {
+  const kb = new InlineKeyboard();
+  return kb
+    .text("📰 مشاهده همه", "news:show")
+    .text("🆕 خبرهای جدید", "news:unread")
+    .row()
+    .text("📚 خوانده‌شده‌ها", "news:history")
+    .text("⚙️ تنظیمات", "news:settings");
+}
+
+function newsSettingsKb(alertsEnabled: boolean) {
+  return new InlineKeyboard()
+    .text("🏷 دسته‌بندی‌ها", "news:categories")
+    .row()
+    .text(`${alertsEnabled ? "🔔" : "🔕"} ارسال خودکار: ${alertsEnabled ? "فعال" : "غیرفعال"}`, "news:alerts")
+    .row()
+    .text("⬅️ بازگشت", "menu:news");
+}
+
+function newsCategoriesKb(categories: NewsCategory[], selected: string[]) {
   const kb = new InlineKeyboard();
   const active = new Set(selected);
   for (const category of categories) {
     const mark = active.has(category.id) ? "✅" : "▫️";
-    kb.text(`${mark} ${category.label.slice(0, 40)} (${category.count})`, `news:toggle:${category.id}`).row();
+    const label = Array.from(category.label).slice(0, 28).join("");
+    kb.text(`${mark} ${label} (${category.count.toLocaleString("fa-IR")})`, `news:toggle:${category.id}`).row();
   }
-  if (categories.length) {
-    kb.text("🗞 نمایش خبرها", "news:show")
-      .text("☑️ انتخاب همه", "news:all")
-      .row();
-  }
-  kb.text("🆕 خبرهای جدید", "news:unread")
-    .text("⭐ ذخیره‌شده‌ها", "news:favorites")
-    .row()
-    .text("📚 خوانده‌شده‌ها", "news:history")
-    .text(`${alertsEnabled ? "🔔" : "🔕"} اعلان دسته‌های من`, "news:alerts")
+  return kb
+    .text("💾 ثبت تغییرات", "news:categories:save")
+    .text("↩️ لغو", "news:categories:cancel")
     .row();
-  return kb.text("🏠 منوی اصلی", "menu:home");
 }
 
-function newsPreferencesText(feed: NewsFeed, selected: string[], alertsEnabled: boolean) {
-  const updatedAt = new Date(feed.updatedAt).toLocaleTimeString("fa-IR", {
-    timeZone: "Asia/Tehran",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
+function newsHomeText() {
+  return "📰 <b>اخبار روز</b>\nیکی از گزینه‌های زیر را انتخاب کن:";
+}
+
+function newsSettingsText(alertsEnabled: boolean) {
   return [
-    "📰 <b>خبرهای شخصی</b>",
-    "دسته‌های دلخواهت را انتخاب کن. خبرهای بازشده خوانده‌شده و خبرهای مهم را می‌توانی ذخیره کنی.",
-    `اعلان خودکار: ${alertsEnabled ? "روشن" : "خاموش"} برای دسته‌های انتخاب‌شده`,
-    `🕒 آخرین دریافت فید: ${updatedAt}${feed.stale ? " (نسخهٔ ذخیره‌شده)" : ""}`,
-    "",
-    feed.categories.length
-      ? `دسته‌های انتخاب‌شده: ${selected.length} از ${feed.categories.length}`
-      : "فعلاً خبری با دسته‌بندی در فید موجود نیست.",
+    "⚙️ <b>تنظیمات اخبار</b>",
+    `ارسال خودکار خبرهای جدید: <b>${alertsEnabled ? "فعال" : "غیرفعال"}</b>`,
+    "دسته‌بندی‌ها را انتخاب کن یا وضعیت ارسال خودکار را تغییر بده.",
+  ].join("\n");
+}
+
+function newsCategoriesText(selectedCount: number, total: number) {
+  return [
+    "🏷 <b>دسته‌بندی خبرها</b>",
+    "دسته‌های موردنظرت را انتخاب کن و در پایان «ثبت تغییرات» را بزن.",
+    `انتخاب‌شده: ${selectedCount.toLocaleString("fa-IR")} از ${total.toLocaleString("fa-IR")}`,
   ].join("\n");
 }
 
@@ -312,7 +328,9 @@ function newsCardKeyboard(index: number, total: number, storyId: string, isFavor
   if (index > 0 || index + 1 < total) kb.row();
   kb.text(isFavorite ? "⭐ ذخیره‌شده" : "☆ ذخیره خبر", `news:favorite:${storyId}`)
     .row()
-    .text("⚙️ انتخاب دسته‌ها", "menu:news")
+    .text("⭐ ذخیره‌ها", "news:favorites")
+    .row()
+    .text("⚙️ تنظیمات", "news:settings")
     .text("🏠 منو", "menu:home");
   return kb;
 }
@@ -436,13 +454,7 @@ async function sendPrices(ctx: Context) {
   }
 }
 
-async function renderNewsPreferences(ctx: Context, feed: NewsFeed) {
-  const [selected, alertsEnabled] = await Promise.all([
-    getNewsSelection(ctx.from!.id, feed.categories),
-    getNewsAlertsEnabled(ctx.from!.id),
-  ]);
-  const text = newsPreferencesText(feed, selected, alertsEnabled);
-  const keyboard = newsPreferencesKb(feed.categories, selected, alertsEnabled);
+async function renderNewsScreen(ctx: Context, text: string, keyboard: InlineKeyboard) {
   const message = ctx.callbackQuery?.message;
   if (message && "photo" in message && message.photo?.length) {
     await ctx.deleteMessage();
@@ -452,21 +464,50 @@ async function renderNewsPreferences(ctx: Context, feed: NewsFeed) {
   await editOrReply(ctx, text, keyboard);
 }
 
+async function renderNewsHome(ctx: Context) {
+  await renderNewsScreen(ctx, newsHomeText(), newsHomeKb());
+}
+
+async function renderNewsSettings(ctx: Context) {
+  const alertsEnabled = await getNewsAlertsEnabled(ctx.from!.id);
+  await renderNewsScreen(ctx, newsSettingsText(alertsEnabled), newsSettingsKb(alertsEnabled));
+}
+
+async function renderNewsCategories(ctx: Context, feed: NewsFeed) {
+  const selected = await getNewsCategoryDraft(ctx.from!.id, feed.categories);
+  await renderNewsScreen(
+    ctx,
+    newsCategoriesText(selected.length, feed.categories.length),
+    newsCategoriesKb(feed.categories, selected)
+  );
+}
+
 async function showNewsList(ctx: Context, title: string, stories: NewsStory[]) {
   if (!stories.length) {
     await editOrReply(
       ctx,
       `${title}\n\nفعلاً خبری در این فهرست نیست.`,
-      new InlineKeyboard().text("⚙️ خبرها و دسته‌ها", "menu:news").text("🏠 منو", "menu:home")
+      new InlineKeyboard().text("⚙️ تنظیمات", "news:settings").text("🏠 اخبار روز", "menu:news")
     );
     return;
   }
+
+  const visibleStories = stories.slice(0, 12);
+  const storyLines = visibleStories.map((story, index) => {
+    const characters = Array.from(story.title);
+    const title = characters.slice(0, 160).join("");
+    const safeTitle = title.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    const number = (index + 1).toLocaleString("fa-IR");
+    return `${number}. ${safeTitle}${characters.length > 160 ? "…" : ""}`;
+  });
   const keyboard = new InlineKeyboard();
-  for (const story of stories.slice(0, 12)) {
-    keyboard.text(Array.from(story.title).slice(0, 54).join(""), `news:open:${story.id}`).row();
-  }
-  keyboard.text("⚙️ خبرها و دسته‌ها", "menu:news").text("🏠 منو", "menu:home");
-  await editOrReply(ctx, title, keyboard);
+  visibleStories.forEach((story, index) => {
+    keyboard.text(`📰 ${(index + 1).toLocaleString("fa-IR")}`, `news:open:${story.id}`);
+    if ((index + 1) % 3 === 0) keyboard.row();
+  });
+  if (visibleStories.length % 3 !== 0) keyboard.row();
+  keyboard.text("⚙️ تنظیمات", "news:settings").text("🏠 اخبار روز", "menu:news");
+  await editOrReply(ctx, `${title}\n\n${storyLines.join("\n")}`, keyboard);
 }
 
 async function reportNewsError(ctx: Context, error: unknown) {
@@ -741,7 +782,6 @@ export function getBot() {
   bot.command("start", async (ctx) => {
     await resetState(ctx);
     if (ANONYMOUS_FEATURES_ENABLED && (await handleStartPayload(ctx))) return;
-    await clearLegacyReplyKeyboard(ctx);
     await ctx.reply(WELCOME, { ...HTML, reply_markup: await menuFor(ctx) });
   });
 
@@ -1285,52 +1325,76 @@ registerReports(bot);
   // ================= خبر شخصی از RSS =================
 
   bot.callbackQuery("menu:news", async (ctx) => {
-    await ctx.answerCallbackQuery({ text: "دریافت دسته‌های RSS…" });
+    await ctx.answerCallbackQuery();
     await resetState(ctx);
+    await renderNewsHome(ctx);
+  });
+
+  bot.callbackQuery("news:settings", async (ctx) => {
+    await ctx.answerCallbackQuery();
+    await renderNewsSettings(ctx);
+  });
+
+  bot.callbackQuery("news:categories", async (ctx) => {
+    await ctx.answerCallbackQuery();
     try {
-      await renderNewsPreferences(ctx, await getNewsFeed());
+      const feed = await getNewsFeed();
+      await beginNewsCategoryDraft(ctx.from.id, feed.categories);
+      await renderNewsCategories(ctx, feed);
     } catch (error) {
       await reportNewsError(ctx, error);
     }
   });
 
   bot.callbackQuery(/^news:toggle:([a-f0-9]{12})$/, async (ctx) => {
-    await ctx.answerCallbackQuery();
     try {
       const feed = await getNewsFeed();
-      await toggleNewsCategory(ctx.from.id, ctx.match[1], feed.categories);
-      await renderNewsPreferences(ctx, feed);
+      await toggleNewsCategoryDraft(ctx.from.id, ctx.match[1], feed.categories);
+      await ctx.answerCallbackQuery();
+      await renderNewsCategories(ctx, feed);
     } catch (error) {
+      await ctx.answerCallbackQuery().catch(() => {});
       await reportNewsError(ctx, error);
     }
   });
 
-  bot.callbackQuery("news:all", async (ctx) => {
-    await ctx.answerCallbackQuery();
+  bot.callbackQuery(/^news:(?:all|show)$/, async (ctx) => {
+    await ctx.answerCallbackQuery({ text: "دریافت خبرها…" });
     try {
       const feed = await getNewsFeed();
-      await setNewsSelection(ctx.from.id, feed.categories.map((category) => category.id), feed.categories);
-      await renderNewsPreferences(ctx, feed);
-    } catch (error) {
-      await reportNewsError(ctx, error);
-    }
-  });
-
-  bot.callbackQuery("news:show", async (ctx) => {
-    await ctx.answerCallbackQuery();
-    try {
-      const feed = await getNewsFeed();
-      const selected = new Set(await getNewsSelection(ctx.from.id, feed.categories));
-      const stories = feed.stories.filter((story) => selected.has(story.categoryId));
-      if (!selected.size) {
-        await renderNewsPreferences(ctx, feed);
-      } else if (!stories.length) {
-        await editOrReply(ctx, "در دسته‌های انتخاب‌شده فعلاً خبری در فید نیست.", new InlineKeyboard()
-          .text("⚙️ انتخاب دسته‌ها", "menu:news")
-          .text("🏠 منو", "menu:home"));
-      } else {
-        await showNewsCard(ctx, feed, stories, 0);
+      if (!feed.stories.length) {
+        await renderNewsScreen(
+          ctx,
+          "فعلاً خبری در فید موجود نیست.",
+          new InlineKeyboard().text("⬅️ بازگشت", "menu:news")
+        );
+        return;
       }
+      await showNewsCard(ctx, feed, feed.stories, 0);
+    } catch (error) {
+      await reportNewsError(ctx, error);
+    }
+  });
+
+  bot.callbackQuery("news:categories:save", async (ctx) => {
+    await ctx.answerCallbackQuery();
+    try {
+      const feed = await getNewsFeed();
+      const selected = await getNewsCategoryDraft(ctx.from.id, feed.categories);
+      await setNewsSelection(ctx.from.id, selected, feed.categories);
+      await renderNewsSettings(ctx);
+    } catch (error) {
+      await reportNewsError(ctx, error);
+    }
+  });
+
+  bot.callbackQuery("news:categories:cancel", async (ctx) => {
+    await ctx.answerCallbackQuery();
+    try {
+      const feed = await getNewsFeed();
+      const selected = await getNewsSelection(ctx.from.id, feed.categories);
+      await setNewsSelection(ctx.from.id, selected, feed.categories);
+      await renderNewsSettings(ctx);
     } catch (error) {
       await reportNewsError(ctx, error);
     }
@@ -1343,7 +1407,7 @@ registerReports(bot);
       const selected = new Set(await getNewsSelection(ctx.from.id, feed.categories));
       const state = await getNewsUserState(ctx.from.id);
       if (!selected.size) {
-        await renderNewsPreferences(ctx, feed);
+        await renderNewsSettings(ctx);
         return;
       }
       const stories = feed.stories.filter(
@@ -1389,7 +1453,7 @@ registerReports(bot);
       const feed = await getNewsFeed();
       const story = feed.stories.find((item) => item.id === ctx.match[1]);
       if (!story) {
-        await renderNewsPreferences(ctx, feed);
+        await renderNewsHome(ctx);
         return;
       }
       await showNewsCard(ctx, feed, [story], 0);
@@ -1404,7 +1468,7 @@ registerReports(bot);
       const story = feed.stories.find((item) => item.id === ctx.match[1]);
       if (!story) {
         await ctx.answerCallbackQuery({ text: "خبر دیگر در فهرست نیست." });
-        await renderNewsPreferences(ctx, feed);
+        await renderNewsHome(ctx);
         return;
       }
       const favorited = await toggleNewsFavorite(ctx.from.id, story.id);
@@ -1423,14 +1487,14 @@ registerReports(bot);
       const enabled = await getNewsAlertsEnabled(ctx.from.id);
       if (!enabled && !selected.length) {
         await ctx.answerCallbackQuery({ text: "اول یک یا چند دسته را انتخاب کن.", show_alert: true });
-        await renderNewsPreferences(ctx, feed);
+        await renderNewsSettings(ctx);
         return;
       }
       await setNewsAlertsEnabled(ctx.from.id, !enabled);
       await ctx.answerCallbackQuery({
         text: enabled ? "اعلان خودکار خاموش شد." : "اعلان برای دسته‌های انتخاب‌شده روشن شد.",
       });
-      await renderNewsPreferences(ctx, feed);
+      await renderNewsSettings(ctx);
     } catch (error) {
       await ctx.answerCallbackQuery().catch(() => {});
       await reportNewsError(ctx, error);
@@ -1441,11 +1505,10 @@ registerReports(bot);
     await ctx.answerCallbackQuery();
     try {
       const feed = await getNewsFeed();
-      const selected = new Set(await getNewsSelection(ctx.from.id, feed.categories));
-      const stories = feed.stories.filter((story) => selected.has(story.categoryId));
+      const stories = feed.stories;
       const index = Number(ctx.match[1]);
       if (!stories.length || !Number.isSafeInteger(index) || index < 0 || index >= stories.length) {
-        await renderNewsPreferences(ctx, feed);
+        await renderNewsHome(ctx);
         return;
       }
       await showNewsCard(ctx, feed, stories, index);

@@ -336,7 +336,7 @@ function validCategoryIds(value: unknown) {
 
 async function getPreferences(userId: number) {
   const [row] = await getDb().select().from(cache).where(eq(cache.key, PREFERENCES_KEY(userId)));
-  return (row?.data as { selected?: unknown; alertsEnabled?: unknown } | undefined) ?? {};
+  return (row?.data as { selected?: unknown; draftSelected?: unknown; alertsEnabled?: unknown } | undefined) ?? {};
 }
 
 export async function getNewsSelection(userId: number, categories: NewsCategory[]) {
@@ -360,6 +360,28 @@ export async function setNewsSelection(userId: number, selected: string[], categ
     .onConflictDoUpdate({ target: cache.key, set: { data, updatedAt: new Date() } });
 }
 
+export async function beginNewsCategoryDraft(userId: number, categories: NewsCategory[]) {
+  const selected = await getNewsSelection(userId, categories);
+  const previous = await getPreferences(userId);
+  const data = {
+    selected: validCategoryIds(previous.selected).filter((id) => categories.some((category) => category.id === id)),
+    draftSelected: selected,
+    alertsEnabled: previous.alertsEnabled === true,
+  };
+  await getDb()
+    .insert(cache)
+    .values({ key: PREFERENCES_KEY(userId), data })
+    .onConflictDoUpdate({ target: cache.key, set: { data, updatedAt: new Date() } });
+}
+
+export async function getNewsCategoryDraft(userId: number, categories: NewsCategory[]) {
+  const available = new Set(categories.map((category) => category.id));
+  const preferences = await getPreferences(userId);
+  const draft = Array.isArray(preferences.draftSelected) ? preferences.draftSelected : preferences.selected;
+  if (!Array.isArray(draft)) return [];
+  return draft.filter((id): id is string => typeof id === "string" && available.has(id));
+}
+
 export async function getNewsAlertsEnabled(userId: number) {
   return (await getPreferences(userId)).alertsEnabled === true;
 }
@@ -374,7 +396,7 @@ export async function setNewsAlertsEnabled(userId: number, enabled: boolean) {
     .onConflictDoUpdate({ target: cache.key, set: { data, updatedAt: new Date() } });
 }
 
-export async function toggleNewsCategory(
+export async function toggleNewsCategoryDraft(
   userId: number,
   categoryId: string,
   categories: NewsCategory[]
@@ -382,11 +404,20 @@ export async function toggleNewsCategory(
   if (!categories.some((category) => category.id === categoryId)) {
     throw new UserError("این دسته‌بندی دیگر در فید موجود نیست؛ فهرست را دوباره باز کن.");
   }
-  const selected = await getNewsSelection(userId, categories);
+  const selected = await getNewsCategoryDraft(userId, categories);
   const next = new Set(selected);
   if (next.has(categoryId)) next.delete(categoryId);
   else next.add(categoryId);
-  await setNewsSelection(userId, [...next], categories);
+  const previous = await getPreferences(userId);
+  const data = {
+    selected: validCategoryIds(previous.selected),
+    draftSelected: [...next],
+    alertsEnabled: previous.alertsEnabled === true,
+  };
+  await getDb()
+    .insert(cache)
+    .values({ key: PREFERENCES_KEY(userId), data })
+    .onConflictDoUpdate({ target: cache.key, set: { data, updatedAt: new Date() } });
   return [...next];
 }
 
