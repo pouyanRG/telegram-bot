@@ -4,7 +4,6 @@ export const FEATURES = {
   assistant: { label: "دستیار شخصی", emoji: "🧠", limit: 10 },
   persona: { label: "شخصیت‌ها", emoji: "🎭", limit: 10 },
   voice: { label: "ویس به متن", emoji: "🎙", limit: 5 },
-  news: { label: "خبر شخصی", emoji: "📰", limit: 3 },
   coin: { label: "جستجوی ارز", emoji: "🪙", limit: 30 },
 } as const;
 

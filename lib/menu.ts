@@ -7,12 +7,10 @@ export function mainMenu(isAdmin = false) {
     .text("💰 رمزارزها", "menu:prices")
     .text("🎙 ویس به متن", "menu:voice")
     .row()
+    .text("📰 خبر شخصی", "menu:news")
     .text("ℹ️ راهنما", "menu:help");
 
-  if (isAdmin) {
-    kb.row().text("📰 خبر شخصی", "menu:news");
-    kb.row().text("⚙️ تنظیمات", "menu:settings");
-  }
+  if (isAdmin) kb.row().text("⚙️ تنظیمات", "menu:settings");
   return kb;
 }
 

@@ -1,5 +1,14 @@
 import { UserError } from "./errors";
-import { NEWS_CATEGORIES, NEWS_CATEGORY_IDS, WINDOWS, type WindowId } from "./news/categories";
+import {
+  formatNewsItem,
+  getNewsFeed,
+  getNewsSelection,
+  setNewsSelection,
+  toggleNewsCategory,
+  type NewsCategory,
+  type NewsFeed,
+  type NewsStory,
+} from "./news";
 import { Bot, GrammyError, InlineKeyboard, type Context } from "grammy";
 import type { InlineKeyboardMarkup } from "grammy/types";
 import { checkRate, shouldWarn } from "./rateLimit";
@@ -14,7 +23,6 @@ import { dedupeUpdates, userGuard, throttle } from "./middleware";
 import { mainMenu, BTN, idleKb, waitingKb, chatKb } from "./menu";
 import { handleVoice, voiceGuide } from "./voice";
 import { clearMode, setVoiceMode } from "./mode";
-import { getNews, formatNews } from "./news";
 import { getCoins, grantProfileReward } from "./coins";
 import { CHAT_INFO, COINS_INFO, PROFILE_INFO } from "./texts";
 import {
@@ -93,6 +101,7 @@ const HELP_USER = [
   "▫️ /prices — وضعیت بازار و ‌ها",
   "▫️ نام یا نماد هر ارز (مثل <code>btc</code> یا <code>solana</code> یا <code>بیت‌کوین</code>) را بفرست تا رمزارز را ببینی",
   "▫️ برای تبدیل ویس به متن، از منو «🎙 ویس به متن» را بزن و بعد ویس بفرست",
+  "▫️ از منوی اصلی «📰 خبر شخصی» را بزن، دسته‌های دلخواهت را انتخاب کن و خبرها را بخوان",
   "▫️ از منوی اصلی «💬 چت ناشناس» را انتخاب کن تا نوع جستجو را مشخص کنی",
   "▫️ /end — پایان چت ناشناس",
   "",
@@ -107,7 +116,6 @@ const HELP_ADMIN = [
   "",
   "🛠 <b>بخش ادمین</b>",
   "▫️ منو ← «⚙️ تنظیمات» — تنظیمات ادمین (مثل استیکر فکرکردن)",
-  "▫️ بخش «📰 خبر شخصی» فقط برای ادمین‌ها فعال است",
 ].join("\n");
 
 const HELP_OWNER = [
@@ -240,36 +248,50 @@ const anonSearchKb: InlineKeyboardMarkup = {
   ],
 };
 
-const newsCatKb = () => {
+function newsPreferencesKb(categories: NewsCategory[], selected: string[]) {
   const kb = new InlineKeyboard();
-  for (const id of NEWS_CATEGORY_IDS) {
-    kb.text(`${NEWS_CATEGORIES[id].emoji} ${NEWS_CATEGORIES[id].label}`, `news:cat:${id}`).row();
+  const active = new Set(selected);
+  for (const category of categories) {
+    const mark = active.has(category.id) ? "✅" : "▫️";
+    kb.text(`${mark} ${category.label.slice(0, 40)} (${category.count})`, `news:toggle:${category.id}`).row();
+  }
+  if (categories.length) {
+    kb.text("🗞 نمایش خبرها", "news:show")
+      .text("☑️ انتخاب همه", "news:all")
+      .row();
   }
   return kb.text("🏠 منوی اصلی", "menu:home");
-};
+}
 
-const newsWinKb = (cat: string) =>
-  new InlineKeyboard()
-    .text(WINDOWS["1"].label, `news:win:${cat}:1`)
-    .text(WINDOWS["3"].label, `news:win:${cat}:3`)
-    .text(WINDOWS["24"].label, `news:win:${cat}:24`)
-    .row()
-    .text("⬅️ بازگشت", "menu:news");
+function newsPreferencesText(feed: NewsFeed, selected: string[]) {
+  const updatedAt = new Date(feed.updatedAt).toLocaleTimeString("fa-IR", {
+    timeZone: "Asia/Tehran",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+  return [
+    "📰 <b>خبرهای شخصی</b>",
+    "یک یا چند دسته را انتخاب کن؛ انتخاب‌ها ذخیره می‌شوند و فقط خبرهای همان دسته‌ها را می‌بینی.",
+    `🌐 منبع: ایران‌اینترنشنال`,
+    `🕒 آخرین دریافت فید: ${updatedAt}${feed.stale ? " (نسخهٔ ذخیره‌شده)" : ""}`,
+    "",
+    feed.categories.length
+      ? `دسته‌های انتخاب‌شده: ${selected.length} از ${feed.categories.length}`
+      : "فعلاً خبری با دسته‌بندی در فید موجود نیست.",
+  ].join("\n");
+}
 
-const newsGoKb = (cat: string, win: string) =>
-  new InlineKeyboard()
-    .text("🔎 شروع جستجو", `news:go:${cat}:${win}`)
+function newsCardKeyboard(index: number, total: number, url: string) {
+  const kb = new InlineKeyboard();
+  if (index > 0) kb.text("⬅️ قبلی", `news:view:${index - 1}`);
+  if (index + 1 < total) kb.text("بعدی ➡️", `news:view:${index + 1}`);
+  if (index > 0 || index + 1 < total) kb.row();
+  kb.url("🔗 متن کامل خبر", url)
     .row()
-    .text("⬅️ بازگشت", `news:cat:${cat}`);
-
-const newsResultKb = (cat: string, win: string) =>
-  new InlineKeyboard()
-    .text("🔄 بروزرسانی", `news:go:${cat}:${win}`)
-    .row()
-    .text("📰 دسته‌ها", "menu:news")
+    .text("⚙️ انتخاب دسته‌ها", "menu:news")
     .text("🏠 منو", "menu:home");
-
-const isWin = (w: string): w is WindowId => w in WINDOWS;
+  return kb;
+}
 
 const backToSettingsKb = new InlineKeyboard().text("🔙 برگشت", "menu:settings");
 
@@ -371,6 +393,86 @@ async function sendPrices(ctx: Context) {
   } catch {
     await ctx.reply("⚠️ الان نمی‌توانم اطلاعات را بگیرم. کمی بعد دوباره امتحان کن.");
   }
+}
+
+async function renderNewsPreferences(ctx: Context, feed: NewsFeed) {
+  const selected = await getNewsSelection(ctx.from!.id, feed.categories);
+  const text = newsPreferencesText(feed, selected);
+  const keyboard = newsPreferencesKb(feed.categories, selected);
+  const message = ctx.callbackQuery?.message;
+  if (message && "photo" in message && message.photo?.length) {
+    await ctx.deleteMessage();
+    await ctx.reply(text, { ...HTML, reply_markup: keyboard });
+    return;
+  }
+  await editOrReply(ctx, text, keyboard);
+}
+
+async function reportNewsError(ctx: Context, error: unknown) {
+  if (error instanceof UserError) {
+    await ctx.reply(error.message);
+    return;
+  }
+  console.error("news error:", error instanceof Error ? error.message : "unknown");
+  await ctx.reply("⚠️ الان نمی‌توانم فید خبر را دریافت کنم. کمی بعد دوباره امتحان کن.");
+}
+
+async function showNewsCard(
+  ctx: Context,
+  feed: NewsFeed,
+  stories: NewsStory[],
+  index: number
+) {
+  const story = stories[index];
+  if (!story) return;
+  const body = formatNewsItem(story, index, stories.length);
+  const caption = feed.stale
+    ? `${body}\n\n⚠️ فید موقتاً به‌روز نشد؛ این خبر از نسخهٔ ذخیره‌شده است.`
+    : body;
+  const keyboard = newsCardKeyboard(index, stories.length, story.url);
+  const message = ctx.callbackQuery?.message;
+  const hasPhoto = !!message && "photo" in message && !!message.photo?.length;
+
+  if (!message) {
+    await sendNewsCard(ctx, story, caption, keyboard);
+  } else if (hasPhoto && story.imageUrl) {
+    try {
+      await ctx.editMessageMedia(
+        { type: "photo", media: story.imageUrl, caption, parse_mode: "HTML" },
+        { reply_markup: keyboard }
+      );
+    } catch (error) {
+      console.warn("news image edit failed:", error instanceof Error ? error.message : "unknown");
+      await ctx.deleteMessage();
+      await ctx.reply(caption, { ...HTML, reply_markup: keyboard });
+    }
+  } else if (!hasPhoto && !story.imageUrl) {
+    await editOrReply(ctx, caption, keyboard);
+  } else {
+    await ctx.deleteMessage();
+    await sendNewsCard(ctx, story, caption, keyboard);
+  }
+}
+
+async function sendNewsCard(
+  ctx: Context,
+  story: NewsStory,
+  caption: string,
+  keyboard: InlineKeyboard
+) {
+  if (story.imageUrl) {
+    try {
+      await ctx.replyWithPhoto(story.imageUrl, {
+        caption,
+        ...HTML,
+        reply_markup: keyboard,
+      });
+      return;
+    } catch (error) {
+      console.warn("news image send failed:", error instanceof Error ? error.message : "unknown");
+    }
+  }
+  await ctx.reply(caption, { ...HTML, reply_markup: keyboard });
 }
 
 // ---------- شروع، منوی اصلی و کیبورد ثابت پایین ----------
@@ -537,16 +639,6 @@ export function getBot() {
   bot.use(dedupeUpdates);
   bot.use(userGuard);
   bot.use(throttle);
-
-  // ================= خبر: فقط ادمین =================
-  // قبل از همه‌ی handlerهای خبر می‌آید؛ برای غیرادمین جلوی ادامه را می‌گیرد
-  bot.callbackQuery(/^(menu:news|news:)/, async (ctx, next) => {
-    if (await isAdminUser(ctx.from.id)) return next();
-    await ctx.answerCallbackQuery({
-      text: "📰 این بخش فعلاً فقط برای ادمین‌هاست.",
-      show_alert: true,
-    });
-  });
 
   // ================= دستورهای عمومی =================
 
@@ -1005,6 +1097,12 @@ registerReports(bot);
   bot.callbackQuery("menu:home", async (ctx) => {
     await ctx.answerCallbackQuery();
     await resetState(ctx);
+    const message = ctx.callbackQuery.message;
+    if (message && "photo" in message && message.photo?.length) {
+      await ctx.deleteMessage();
+      await ctx.reply(WELCOME, { ...HTML, reply_markup: await menuFor(ctx) });
+      return;
+    }
     await editOrReply(ctx, WELCOME, await menuFor(ctx));
   });
 
@@ -1065,67 +1163,76 @@ registerReports(bot);
     await ctx.answerCallbackQuery({ text: "این بخش به‌زودی فعال می‌شود 🚧" });
   });
 
-  // ================= خبر شخصی (فقط ادمین؛ گارد بالا) =================
+  // ================= خبر شخصی از RSS =================
 
   bot.callbackQuery("menu:news", async (ctx) => {
-    await ctx.answerCallbackQuery();
-    await editOrReply(ctx, "📰 <b>خبر شخصی</b>\nموضوع را انتخاب کن:", newsCatKb());
-  });
-
-  bot.callbackQuery(/^news:cat:(\w+)$/, async (ctx) => {
-    await ctx.answerCallbackQuery();
-    const cat = NEWS_CATEGORIES[ctx.match[1]];
-    if (!cat) return;
-    await editOrReply(ctx, `${cat.emoji} <b>${cat.label}</b>\nبازه‌ی زمانی را انتخاب کن:`, newsWinKb(cat.id));
-  });
-
-  bot.callbackQuery(/^news:win:(\w+):(\w+)$/, async (ctx) => {
-    await ctx.answerCallbackQuery();
-    const [, catId, win] = ctx.match;
-    const cat = NEWS_CATEGORIES[catId];
-    if (!cat || !isWin(win)) return;
-    await editOrReply(
-      ctx,
-      `${cat.emoji} <b>${cat.label}</b> — ${WINDOWS[win].label}\nبرای شروع جستجو دکمه‌ی زیر را بزن.`,
-      newsGoKb(cat.id, win)
-    );
-  });
-
-  bot.callbackQuery(/^news:go:(\w+):(\w+)$/, async (ctx) => {
-    const [, catId, win] = ctx.match;
-    const cat = NEWS_CATEGORIES[catId];
-    if (!cat || !isWin(win)) return void (await ctx.answerCallbackQuery());
-
-    // سهمیه‌ی روزانه (ادمین‌ها معاف؛ چون این بخش فقط ادمین دارد، عملاً همیشه معاف است)
-    const uid = ctx.from.id;
-    let consumed = false;
-    if (!(await isAdminUser(uid))) {
-      const q = await consumeQuota(uid, "news");
-      if (!q.allowed) {
-        await ctx.answerCallbackQuery();
-        return void (await ctx.reply(quotaExceededMessage("news"), HTML));
-      }
-      consumed = true;
-    }
-    const refund = async () => {
-      if (consumed) await refundQuota(uid, "news").catch((e) => console.error("refund error:", e));
-    };
-
-    await ctx.answerCallbackQuery({ text: "در حال جستجو…" });
-    await ctx.replyWithChatAction("typing");
-
+    await ctx.answerCallbackQuery({ text: "دریافت دسته‌های RSS…" });
+    await resetState(ctx);
     try {
-      const r = await withThinking(ctx, () => getNews(cat.id, win));
-      let text = formatNews(cat.id, win, r, r.updatedAt);
-      if (text.length > 4000) text = text.slice(0, 3990).replace(/\n[^\n]*$/, "") + "\n…";
-      await ctx.reply(text, { ...HTML, ...NO_PREVIEW, reply_markup: newsResultKb(cat.id, win) });
-      // نتیجه‌ی خالی هم سهمیه را مصرف نمی‌کند
-      if (r.items.length === 0) await refund();
-    } catch (e) {
-      await refund();
-      if (e instanceof UserError) return void (await ctx.reply(e.message));
-      console.error("news error:", e instanceof Error ? e.message : "unknown");
-      await ctx.reply("⚠️ الان نمی‌توانم خبرها را بگیرم. کمی بعد دوباره امتحان کن.");
+      await renderNewsPreferences(ctx, await getNewsFeed());
+    } catch (error) {
+      await reportNewsError(ctx, error);
+    }
+  });
+
+  bot.callbackQuery(/^news:toggle:([a-f0-9]{12})$/, async (ctx) => {
+    await ctx.answerCallbackQuery();
+    try {
+      const feed = await getNewsFeed();
+      await toggleNewsCategory(ctx.from.id, ctx.match[1], feed.categories);
+      await renderNewsPreferences(ctx, feed);
+    } catch (error) {
+      await reportNewsError(ctx, error);
+    }
+  });
+
+  bot.callbackQuery("news:all", async (ctx) => {
+    await ctx.answerCallbackQuery();
+    try {
+      const feed = await getNewsFeed();
+      await setNewsSelection(ctx.from.id, feed.categories.map((category) => category.id), feed.categories);
+      await renderNewsPreferences(ctx, feed);
+    } catch (error) {
+      await reportNewsError(ctx, error);
+    }
+  });
+
+  bot.callbackQuery("news:show", async (ctx) => {
+    await ctx.answerCallbackQuery();
+    try {
+      const feed = await getNewsFeed();
+      const selected = new Set(await getNewsSelection(ctx.from.id, feed.categories));
+      const stories = feed.stories.filter((story) => selected.has(story.categoryId));
+      if (!selected.size) {
+        await editOrReply(ctx, "اول دست‌کم یک دسته را انتخاب کن:", newsPreferencesKb(feed.categories, []));
+      } else if (!stories.length) {
+        await editOrReply(
+          ctx,
+          "در دسته‌های انتخاب‌شده فعلاً خبری در فید نیست.",
+          newsPreferencesKb(feed.categories, [...selected])
+        );
+      } else {
+        await showNewsCard(ctx, feed, stories, 0);
+      }
+    } catch (error) {
+      await reportNewsError(ctx, error);
+    }
+  });
+
+  bot.callbackQuery(/^news:view:(\d+)$/, async (ctx) => {
+    await ctx.answerCallbackQuery();
+    try {
+      const feed = await getNewsFeed();
+      const selected = new Set(await getNewsSelection(ctx.from.id, feed.categories));
+      const stories = feed.stories.filter((story) => selected.has(story.categoryId));
+      const index = Number(ctx.match[1]);
+      if (!stories.length || !Number.isSafeInteger(index) || index < 0 || index >= stories.length) {
+        await renderNewsPreferences(ctx, feed);
+        return;
+      }
+      await showNewsCard(ctx, feed, stories, index);
+    } catch (error) {
+      await reportNewsError(ctx, error);
     }
   });
 
