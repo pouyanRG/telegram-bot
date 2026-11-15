@@ -378,7 +378,7 @@ async function showNewsList(ctx: Context, feed: NewsFeed, kind: NewsListKind, pa
   const keyboard = new InlineKeyboard();
   const headlines = visibleStories.map((story, index) => {
     const number = (start + index + 1).toLocaleString("fa-IR");
-    return `<blockquote>${number}. ${formatNewsTitle(story.title, 110)}</blockquote>`;
+    return `<blockquote>\u200f${number}. ${formatNewsTitle(story.title, 110)}</blockquote>`;
   });
   visibleStories.forEach((story, index) => {
     const number = (start + index + 1).toLocaleString("fa-IR");
