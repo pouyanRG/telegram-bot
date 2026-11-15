@@ -11,7 +11,7 @@ function redis() {
   return _redis;
 }
 
-type Kind = "general" | "relay";
+type Kind = "general";
 let _limiters: Record<Kind, Ratelimit> | null = null;
 
 function limiters() {
@@ -24,13 +24,6 @@ function limiters() {
       limiter: Ratelimit.slidingWindow(10, "5 s"),
       prefix: "rl:g",
       timeout: 1000, // اگر Redis کند بود، اجازه بده (fail-open)
-    }),
-    // فقط پیام‌هایی که به طرف مقابل چت ناشناس فوروارد می‌شوند (سخت‌گیرانه‌تر)
-    relay: new Ratelimit({
-      redis: r,
-      limiter: Ratelimit.slidingWindow(4, "2 s"),
-      prefix: "rl:r",
-      timeout: 1000,
     }),
   });
 }
@@ -57,4 +50,3 @@ export async function shouldWarn(userId: number) {
     return false;
   }
 }
-

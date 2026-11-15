@@ -1,7 +1,5 @@
 // ---------- قابلیت‌ها و سهمیه‌ی روزانه ----------
 
-export const ANONYMOUS_FEATURES_ENABLED = false;
-
 export const FEATURES = {
   assistant: { label: "دستیار شخصی", emoji: "🧠", limit: 10 },
   persona: { label: "شخصیت‌ها", emoji: "🎭", limit: 10 },
@@ -105,14 +103,6 @@ export function pickVoiceTier(sec: number) {
 
 export const COINS = {
   profileReward: 10,
-  genderSearch: 2,
-  directMessage: 1,
-  chatRequest: 2,
-  notifyOnline: 1,
-  notifyChatEnd: 1,
   newBio: 1,
-  referralJoin: 5,
-  referralComplete: 15,
   reportReward: 5,
-  shortChatRefund: 1,
 } as const;

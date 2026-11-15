@@ -339,17 +339,13 @@ async function getPreferences(userId: number) {
   return (row?.data as { selected?: unknown; draftSelected?: unknown; alertsEnabled?: unknown } | undefined) ?? {};
 }
 
-export async function getNewsSelection(userId: number, categories: NewsCategory[]) {
-  const available = new Set(categories.map((category) => category.id));
-  const data = await getPreferences(userId);
-  if (!Array.isArray(data?.selected)) return [];
-  return data.selected.filter((id): id is string => typeof id === "string" && available.has(id));
+export async function getNewsSelection(userId: number, _categories?: NewsCategory[]) {
+  return validCategoryIds((await getPreferences(userId)).selected);
 }
 
-export async function setNewsSelection(userId: number, selected: string[], categories: NewsCategory[]) {
-  const allowed = new Set(categories.map((category) => category.id));
+export async function setNewsSelection(userId: number, selected: string[], _categories?: NewsCategory[]) {
   const previous = await getPreferences(userId);
-  const nextSelection = [...new Set(selected.filter((id) => allowed.has(id)))];
+  const nextSelection = validCategoryIds(selected);
   const data = {
     selected: nextSelection,
     alertsEnabled: nextSelection.length > 0 && previous.alertsEnabled === true,
@@ -364,7 +360,7 @@ export async function beginNewsCategoryDraft(userId: number, categories: NewsCat
   const selected = await getNewsSelection(userId, categories);
   const previous = await getPreferences(userId);
   const data = {
-    selected: validCategoryIds(previous.selected).filter((id) => categories.some((category) => category.id === id)),
+    selected: validCategoryIds(previous.selected),
     draftSelected: selected,
     alertsEnabled: previous.alertsEnabled === true,
   };
@@ -374,12 +370,10 @@ export async function beginNewsCategoryDraft(userId: number, categories: NewsCat
     .onConflictDoUpdate({ target: cache.key, set: { data, updatedAt: new Date() } });
 }
 
-export async function getNewsCategoryDraft(userId: number, categories: NewsCategory[]) {
-  const available = new Set(categories.map((category) => category.id));
+export async function getNewsCategoryDraft(userId: number, _categories?: NewsCategory[]) {
   const preferences = await getPreferences(userId);
   const draft = Array.isArray(preferences.draftSelected) ? preferences.draftSelected : preferences.selected;
-  if (!Array.isArray(draft)) return [];
-  return draft.filter((id): id is string => typeof id === "string" && available.has(id));
+  return validCategoryIds(draft);
 }
 
 export async function getNewsAlertsEnabled(userId: number) {

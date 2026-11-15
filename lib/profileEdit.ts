@@ -250,7 +250,7 @@ export function registerProfileEdit(bot: Bot) {
             tx,
             uid,
             COINS.newBio,
-            "new_bio",
+            "purchase",
             `msg:${ctx.message.message_id}`
           );
           if (left === null) throw new NotEnoughCoins();

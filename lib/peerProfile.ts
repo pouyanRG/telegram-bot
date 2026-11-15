@@ -1,7 +1,5 @@
 import type { Context } from "grammy";
 import type { InlineKeyboardMarkup } from "grammy/types";
-import { ANONYMOUS_FEATURES_ENABLED } from "./config";
-import { getAnon } from "./anon";
 import { getDefaultPhoto } from "./defaultPhoto";
 import type { users } from "./schema";
 import { ensurePublicId, sendProfile } from "./userProfile";
@@ -15,23 +13,12 @@ export function peerKb(targetId: number, likes: number, adminDelPhoto = false): 
   const rows: InlineKeyboardMarkup["inline_keyboard"] = [
     [{ text: `Like ❤️ ${likes}`, callback_data: `pp:like:${targetId}` }],
     [{ text: "🎁 خرید سکه برای این کاربر", callback_data: `pp:gift:${targetId}` }],
-  ];
-  if (ANONYMOUS_FEATURES_ENABLED) {
-    rows.push([
-      { text: "💌 پیام دایرکت", callback_data: `pp:dm:${targetId}`, style: "success" },
-      { text: "🗳 درخواست چت", callback_data: `pp:chat:${targetId}`, style: "success" },
-    ]);
-  }
-  rows.push(
     [
       { text: "🔓 بلاک کردن کاربر", callback_data: `pp:block:${targetId}` },
       { text: "➕ افزودن به مخاطبین", callback_data: `pp:add:${targetId}` },
     ],
-    [{ text: "🚫 گزارش کاربر", callback_data: `rp:${targetId}`, style: "danger" }]
-  );
-  if (ANONYMOUS_FEATURES_ENABLED) {
-    rows.push([{ text: "🔔 به محض اتمام چت اطلاع بده", callback_data: `pp:notify:${targetId}` }]);
-  }
+    [{ text: "🚫 گزارش کاربر", callback_data: `rp:${targetId}`, style: "danger" }],
+  ];
   if (adminDelPhoto) {
     rows.push([{ text: "🗑 حذف عکس (ادمین)", callback_data: `adm:delphoto:${targetId}` }]);
   }
@@ -47,17 +34,11 @@ export async function sendPeerProfile(
   if (target.telegramId === viewerId) return sendProfile(ctx, target, viewerId);
 
   const publicId = await ensurePublicId(target.telegramId, target.publicId);
-  const a = ANONYMOUS_FEATURES_ENABLED
-    ? await getAnon(target.telegramId).catch(() => null)
-    : null;
   const online = Date.now() - target.lastSeenAt.getTime() < ONLINE_MS;
 
-  const status =
-    a?.state === "chatting"
-      ? "هم اکنون 👀 آنلایــن ( 🗣 درحال‌چت)"
-      : online
-        ? "هم اکنون 👀 آنلایــن"
-        : `آخرین بازدید: ${target.lastSeenAt.toLocaleDateString("fa-IR", { timeZone: "Asia/Tehran" })}`;
+  const status = online
+    ? "هم اکنون 👀 آنلایــن"
+    : `آخرین بازدید: ${target.lastSeenAt.toLocaleDateString("fa-IR", { timeZone: "Asia/Tehran" })}`;
 
   const gender = target.gender === "m" ? "پسر 👨‍🦱" : target.gender === "f" ? "دختر 👩" : "—";
   const caption = [

@@ -16,27 +16,19 @@ import {
   type NewsFeed,
   type NewsStory,
 } from "./news";
-import { Bot, GrammyError, InlineKeyboard, Keyboard, type Context } from "grammy";
-import type { InlineKeyboardMarkup } from "grammy/types";
-import { checkRate, shouldWarn } from "./rateLimit";
+import { Bot, GrammyError, InlineKeyboard, type Context } from "grammy";
 import { registerReports, clearReport, takePendingDefPhoto } from "./reports";
 import { sendPeerProfile } from "./peerProfile";
 import { registerProfileEdit, clearEdit } from "./profileEdit";
-import {
-  ANONYMOUS_FEATURES_ENABLED,
-  SETTINGS,
-  COINS,
-  quotaExceededMessage,
-} from "./config";
-import { registerAnonLink, handleStartPayload, sendMyLink, clearDmState } from "./anonLink";
+import { SETTINGS, quotaExceededMessage } from "./config";
 import { consumeQuota, refundQuota } from "./quota";
 import { getPrices, formatPrices, findCoin, formatCoin } from "./prices";
 import { dedupeUpdates, userGuard, throttle } from "./middleware";
-import { mainMenu, BTN, idleKb, waitingKb, chatKb } from "./menu";
+import { mainMenu, BTN, idleKb } from "./menu";
 import { handleVoice, voiceGuide } from "./voice";
 import { clearMode, setVoiceMode } from "./mode";
 import { getCoins, grantProfileReward } from "./coins";
-import { CHAT_INFO, COINS_INFO, PROFILE_INFO } from "./texts";
+import { COINS_INFO, PROFILE_INFO } from "./texts";
 import {
   addAdmin,
   isAdminUser,
@@ -48,29 +40,8 @@ import {
   setPendingSticker,
   setThinkingSticker,
   takePendingSticker,
-  withThinking,
 } from "./admins";
-import {
-  joinQueue,
-  leaveChat,
-  getAnon,
-  cancelSearch,
-  getChat,
-  getChatByCode,
-  logMessages,
-  deleteChatMessages,
-  MIN_CHAT_SEC,
-  RANDOM,
-  type SearchOpts,
-} from "./anon";
-
-import {
-  ensurePublicId,
-  getUserByPublicId,
-  getUserRow,
-  sendProfile,
-  toggleSilent,
-} from "./userProfile";
+import { getUserByPublicId, getUserRow, sendProfile } from "./userProfile";
 import {
   AGE_TEXT,
   BACK_TEXT,
@@ -96,16 +67,6 @@ let _bot: Bot | null = null;
 
 // ---------- متن‌ها ----------
 
-const RLM = "\u200F";
-
-// اسمی که در پیام «پروفایلت دیده شد» نشان داده می‌شود؛ اسم ربات خودت را بگذار
-const BOT_NAME = "ربات";
-
-const DISABLED_ANON_BUTTONS = new Set([
-  BTN.connect, BTN.search, BTN.nearby, BTN.link,
-  BTN.cancel, BTN.end, BTN.next, BTN.peer, BTN.safe,
-]);
-
 const WELCOME =
   "👋 <b>سلام!</b>\nاز منوی زیر انتخاب کن از کدام بخش می‌خواهی استفاده کنی:";
 
@@ -115,17 +76,10 @@ const HELP_USER = [
   "ℹ️ <b>راهنما</b>",
   "",
   "▫️ /menu — منوی اصلی",
-  "▫️ /prices — وضعیت بازار و ‌ها",
+  "▫️ /prices — وضعیت بازار ارزهای دیجیتال",
   "▫️ نام یا نماد هر ارز (مثل <code>btc</code> یا <code>solana</code> یا <code>بیت‌کوین</code>) را بفرست تا رمزارز را ببینی",
   "▫️ برای تبدیل ویس به متن، از منو «🎙 ویس به متن» را بزن و بعد ویس بفرست",
   "▫️ از منوی اصلی «📰 اخبار روز» را بزن، دسته‌های دلخواهت را انتخاب کن و خبرها را بخوان",
-  ...(ANONYMOUS_FEATURES_ENABLED
-    ? [
-        "▫️ از منوی اصلی «💬 چت ناشناس» را انتخاب کن تا نوع جستجو را مشخص کنی",
-        "▫️ /end — پایان چت ناشناس",
-        CHAT_INFO,
-      ]
-    : []),
   "",
   PROFILE_INFO,
   "",
@@ -142,54 +96,6 @@ const HELP_OWNER = [
   "▫️ /addadmin <code>آیدی</code> — افزودن ادمین فرعی",
   "▫️ /removeadmin <code>آیدی</code> — حذف ادمین فرعی",
   "▫️ /admins — فهرست ادمین‌ها",
-].join("\n");
-
-// پیام بعد از زدن «جستجوی شانسی»
-const ANON_SEARCHING = [
-  "🔎 درحال جستجوی مخاطب ناشناس شما",
-  "🎲 جستوجوی شانسی",
-  "",
-  "⏳ حداکثر تا ۲ دقیقه صبر کنید.",
-].join("\n");
-
-// پیام بعد از اتصال (برای هر دو نفر)
-const ANON_MATCHED = [
-  "👀 پیدا کردم وصلتون کردم، به مخاطبت سلام کن 🗣",
-  "<blockquote expandable>🚫 اخطار: به هیچ کاربری در ربات اعتماد نکنید و اطلاعات شخصیتان را در اختیارشان قرار ندهید",
-  "",
-  "⚠️ درصورتی که کاربر در اول چت از شما خواست به پی وی شخصی او بروید چت را قطع کرده و او را گزارش کنید!</blockquote>",
-].join("\n");
-
-const END_CONFIRM_TEXT = "🤖 پیام سیستم 👇\n\nمطمئنی میخوای چت رو قطع کنی؟";
-
-// برای طرفی که پروفایلش دیده شده
-const PROFILE_VIEWED = [
-  "🤖 پیام سیستم 👇",
-  "",
-  `مخاطب شما 《 پروفایلِ ${BOT_NAME} 》 شما را مشاهده کرد.`,
-  "",
-  `<code>⚠️ توجه: پروفایلِ ${BOT_NAME} اطلاعاتی است که در بخش پروفایل ربات ثبت کرده اید!</code>`,
-].join("\n");
-
-// پیام قطع چت؛ byYou=false یعنی برای طرفی که چتش توسط مخاطب قطع شده
-const endedText = (otherPublicId: string, code: string, byYou: boolean) =>
-  [
-    `${RLM}🎌 چت شما با /user_${otherPublicId} ${byYou ? "توسط شما" : "توسط مخاطب شما"} قطع شد.`,
-    "",
-    `${RLM}برای گزارش عدم رعایت قوانین (/ghavanin) می توانید با لمس 《 🚫 گزارش کاربر 》 در پروفایل، کاربر را گزارش کنید.`,
-    "",
-    `${RLM}🗑 برای حذف کل پیام های در چت هر دو طرف روی /delet_chat_${code} کلیک کنید!`,
-    "",
-    "<blockquote>⚠️ توجه: فقط پیام هایی که تا 48 ساعت پیش ارسال شده باشند حذف میشوند!</blockquote>",
-  ].join("\n");
-
-// پنل انتخاب نوع جستجو (بعد از زدن «به یه ناشناس وصلم کن!»)
-const ANON_PICK_TEXT = [
-  "\u200F لطفا قبل از شروع چت قوانین ربات « /ghavanin » را مطالعه و رعایت کنید.",
-  "",
-  "<blockquote expandable>\u200F⚠️ توجه داشته باشید که در بخش جستجوی شانسی بدلیل درخواست‌های زیاد احتمال اتصال به کاربر خانم بشدت پایینه!</blockquote>",
-  "",
-  "\u200F🫧 به کی وصلت کنم؟ <code>انتخاب کن</code> 👇",
 ].join("\n");
 
 const RULES_TEXT = [
@@ -242,31 +148,6 @@ const pricesKb = new InlineKeyboard()
   .row()
   .text("🏠 منوی اصلی", "menu:home");
 const cancelStickerKb = new InlineKeyboard().text("❌ انصراف", "admin:sticker_cancel");
-
-// دکمه‌ی شیشه‌ای زیر پیام جستجو
-const cancelSearchKb = new InlineKeyboard().text("❌ لغو جستجو", "anon:cancel");
-
-// ترتیب از چپ به راست: اتمام چت | ادامه چت
-const endConfirmKb = new InlineKeyboard()
-  .text("اتمام چت ❌", "anon:end")
-  .text("ادامه چت 🗣", "anon:keep");
-
-// ترتیب هر ردیف از چپ به راست است (چیدمان تلگرام)
-const anonSearchKb: InlineKeyboardMarkup = {
-  inline_keyboard: [
-    [{ text: "🎲 جستجوی شانسی", callback_data: "anon:random", style: "primary" }],
-    [
-      { text: "👦 جستجوی پسر", callback_data: "anon:boy" },
-      { text: "👧 جستجوی دختر", callback_data: "anon:girl" },
-    ],
-    [{ text: "📍 جستجوی اطراف", callback_data: "anon:nearby", style: "danger" }],
-    [
-      { text: "🎎 جستجوی هم استانی", callback_data: "anon:province" },
-      { text: "👥 جستجوی هم سنی", callback_data: "anon:age" },
-    ],
-    [{ text: "⬅️ بازگشت به منوی اصلی", callback_data: "menu:home" }],
-  ],
-};
 
 function newsHomeKb() {
   const kb = new InlineKeyboard();
@@ -380,26 +261,17 @@ async function menuFor(ctx: Context) {
   return mainMenu(!!uid && (await isAdminUser(uid)));
 }
 
-async function stopDisabledAnonSession(userId: number, ctx: Context) {
-  if (!(await getAnon(userId))) return;
-  const result = await leaveChat(userId);
-  if (result.was === "chatting" && result.partnerId) {
-    await ctx.api
-      .sendMessage(result.partnerId, "این بخش فعلاً در دسترس نیست.", { reply_markup: idleKb })
-      .catch((error) =>
-        console.warn("disabled chat partner notification failed:", error instanceof Error ? error.message : "unknown")
-      );
-  }
-}
-
 /** هر بار که کاربر در منو جابه‌جا می‌شود: ویس غیرفعال، حالت انتظار استیکر و مرحله‌ی نیمه‌کاره‌ی پروفایل لغو می‌شود */
 async function resetState(ctx: Context) {
   const uid = ctx.from?.id;
   if (!uid) return;
   await Promise.all([
-    clearMode(uid), takePendingSticker(uid), clearStep(uid), clearEdit(uid),
-    clearReport(uid), takePendingDefPhoto(uid), clearDmState(uid),
-    ...(ANONYMOUS_FEATURES_ENABLED ? [] : [stopDisabledAnonSession(uid, ctx)]),
+    clearMode(uid),
+    takePendingSticker(uid),
+    clearStep(uid),
+    clearEdit(uid),
+    clearReport(uid),
+    takePendingDefPhoto(uid),
   ]).catch((e) => console.error("resetState error:", e));
 }
 
@@ -428,10 +300,9 @@ async function askStep(ctx: Context, step: "gender" | "age" | "province", replyT
 }
 
 /** اگر پروفایل کامل است true؛ وگرنه از اولین مرحله‌ی ناقص ادامه می‌دهد و false برمی‌گرداند */
-async function ensureProfile(ctx: Context, notice = false) {
+async function ensureProfile(ctx: Context) {
   const step = missingStep(await getProfile(ctx.from!.id));
   if (!step) return true;
-  if (notice) await ctx.reply("⚠️ برای وصل شدن به ناشناس، اول باید پروفایلت را کامل کنی.");
   await askStep(ctx, step, ctx.message?.message_id);
   return false;
 }
@@ -475,9 +346,10 @@ async function renderNewsSettings(ctx: Context) {
 
 async function renderNewsCategories(ctx: Context, feed: NewsFeed) {
   const selected = await getNewsCategoryDraft(ctx.from!.id, feed.categories);
+  const available = new Set(feed.categories.map((c) => c.id));
   await renderNewsScreen(
     ctx,
-    newsCategoriesText(selected.length, feed.categories.length),
+    newsCategoriesText(selected.filter((id) => available.has(id)).length, feed.categories.length),
     newsCategoriesKb(feed.categories, selected)
   );
 }
@@ -580,155 +452,13 @@ async function sendNewsCard(
   await ctx.reply(caption, { ...HTML, reply_markup: keyboard });
 }
 
-// ---------- شروع، منوی اصلی و کیبورد ثابت پایین ----------
-
-/** کیبورد پایین متناسب با وضعیت چت ناشناس کاربر */
-async function bottomKeyboardFor(ctx: Context) {
-  const a = ctx.from ? await getAnon(ctx.from.id).catch(() => null) : null;
-  return a?.state === "chatting" ? chatKb : a?.state === "waiting" ? waitingKb : idleKb;
-}
+// ---------- شروع و منوی اصلی ----------
 
 /** /menu و دکمه‌ی «📋 منو»: منوی اینلاین اصلی */
 async function showHome(ctx: Context) {
   await resetState(ctx);
   await clearLegacyReplyKeyboard(ctx);
   await ctx.reply(WELCOME, { ...HTML, reply_markup: await menuFor(ctx) });
-}
-
-// ---------- چت ناشناس ----------
-
-/** با زدن «به یه ناشناس وصلم کن!»: پنل انتخاب نوع جستجو */
-async function showAnonOptions(ctx: Context) {
-  await resetState(ctx);
-  const a = await getAnon(ctx.from!.id);
-
-  if (a?.state === "chatting") {
-    return void (await ctx.reply("الان وسط چت هستی. برای پایان «پایان چت» را بزن.", {
-      reply_markup: chatKb,
-    }));
-  }
-  if (a?.state === "waiting") {
-    return void (await ctx.reply(ANON_SEARCHING, { reply_markup: cancelSearchKb }));
-  }
-
-  // بدون پروفایل کامل اجازه‌ی چت ناشناس نیست
-  if (!(await ensureProfile(ctx, true))) return;
-
-  await ctx.reply(ANON_PICK_TEXT, {
-    ...HTML,
-    ...NO_PREVIEW,
-    // ریپلای روی پیام کاربر
-    ...(ctx.message?.message_id
-      ? { reply_parameters: { message_id: ctx.message.message_id } }
-      : {}),
-    reply_markup: anonSearchKb,
-  });
-}
-
-
-const searchLabel = (o: SearchOpts) => {
-  const g =
-    o.gender === "m" ? "👦 جستجوی پسر" : o.gender === "f" ? "👧 جستجوی دختر" : "🎲 جستجوی شانسی";
-  const s = o.scope === "province" ? "🎎 هم استانی" : o.scope === "age" ? "👥 هم سنی" : null;
-  return s ? `${s} — ${g}` : g;
-};
-
-const searchingText = (o: SearchOpts) =>
-  ["🔎 درحال جستجوی مخاطب ناشناس شما", searchLabel(o), "", "⏳ حداکثر تا ۲ دقیقه صبر کنید."].join("\n");
-
-const noCoinsText = `💰 برای جستجو بر اساس جنسیت ${COINS.genderSearch} سکه لازم است و موجودی کافی نداری.\n<blockquote>سکه فقط وقتی کسر می‌شود که به کسی وصل شوی.</blockquote>`;
-
-/** ورود به صف و اتصال */
-async function startAnon(ctx: Context, opts: SearchOpts = RANDOM) {
-  const uid = ctx.from!.id;
-  await resetState(ctx);
-
-  if (!(await ensureProfile(ctx, true))) return;
-
-  if (opts.gender && (await getCoins(uid)) < COINS.genderSearch) {
-    return void (await ctx.reply(noCoinsText, { ...HTML, reply_markup: idleKb }));
-  }
-
-  const r = await joinQueue(uid, opts);
-
-  if (r.status === "noprofile") {
-    await ensureProfile(ctx);
-    return;
-  }
-  if (r.status === "nocoins") {
-    return void (await ctx.reply(noCoinsText, { ...HTML, reply_markup: idleKb }));
-  }
-  if (r.status === "chatting") {
-    return void (await ctx.reply("الان وسط چت هستی. برای پایان «پایان چت» را بزن.", {
-      reply_markup: chatKb,
-    }));
-  }
-  if (r.status === "waiting") {
-    return void (await ctx.reply(searchingText(opts), { reply_markup: cancelSearchKb }));
-  }
-
-  // وصل شد: اول به طرف مقابل خبر بده؛ اگر ربات را بلاک کرده بود اتصال لغو می‌شود
-  try {
-    await ctx.api.sendMessage(r.partnerId, ANON_MATCHED, { ...HTML, reply_markup: chatKb });
-  } catch {
-    await leaveChat(uid);
-    return void (await ctx.reply("😕 طرف مقابل در دسترس نبود. دوباره امتحان کن.", {
-      reply_markup: idleKb,
-    }));
-  }
-  await ctx.reply(ANON_MATCHED, { ...HTML, reply_markup: chatKb });
-  if (opts.gender) {
-    await ctx.reply(
-      `💰 ${COINS.genderSearch} سکه کسر شد. اگر چت زیر ۱ دقیقه تمام شود ${COINS.shortChatRefund} سکه برمی‌گردد.`
-    );
-  }
-}
-
-async function publicIdOf(userId: number) {
-  const u = await getUserRow(userId);
-  return ensurePublicId(userId, u?.publicId ?? null);
-}
-
-/** با زدن «پایان چت»: سؤال تأیید (ریپلای روی پیام کاربر) */
-async function askEnd(ctx: Context) {
-  const a = await getAnon(ctx.from!.id);
-  if (a?.state !== "chatting") return endAnon(ctx); // در صف است یا چتی ندارد
-  await ctx.reply(END_CONFIRM_TEXT, {
-    ...(ctx.message ? { reply_parameters: { message_id: ctx.message.message_id } } : {}),
-    reply_markup: endConfirmKb,
-  });
-}
-
-/** پایان واقعی چت (یا لغو جستجو) */
-async function endAnon(ctx: Context) {
-  const uid = ctx.from!.id;
-  const r = await leaveChat(uid);
-
-  if (r.was === "waiting") {
-    return void (await ctx.reply("جستجو لغو شد.", { reply_markup: idleKb }));
-  }
-  if (r.was === "none") {
-    return void (await ctx.reply("الان چت فعالی نداری.", { reply_markup: idleKb }));
-  }
-
-  const chat = r.chatId ? await getChat(r.chatId) : null;
-  if (!chat || !r.partnerId) {
-    if (r.partnerId) {
-      await ctx.api
-        .sendMessage(r.partnerId, "🛑 طرف مقابل چت را ترک کرد.", { reply_markup: idleKb })
-        .catch(() => {});
-    }
-    return void (await ctx.reply("🛑 چت تمام شد.", { reply_markup: idleKb }));
-  }
-
-  const [myPid, partnerPid] = await Promise.all([publicIdOf(uid), publicIdOf(r.partnerId)]);
-  const opts = { ...HTML, ...NO_PREVIEW, reply_markup: idleKb };
-
-  await ctx.reply(endedText(partnerPid, chat.code, true), opts);
-  await ctx.api.sendMessage(r.partnerId, endedText(myPid, chat.code, false), opts).catch(() => {});
-  const note = `↩️ چت زیر ۱ دقیقه تمام شد؛ ${COINS.shortChatRefund} سکه به حسابت برگشت.`;
-  if (r.refunded.includes(uid)) await ctx.reply(note).catch(() => {});
-  if (r.refunded.includes(r.partnerId)) await ctx.api.sendMessage(r.partnerId, note).catch(() => {});
 }
 
 // ---------- ساخت ربات ----------
@@ -745,43 +475,11 @@ export function getBot() {
   bot.use(dedupeUpdates);
   bot.use(userGuard);
   bot.use(throttle);
-  bot.use(async (ctx, next) => {
-    if (ANONYMOUS_FEATURES_ENABLED) return next();
-
-    if (ctx.callbackQuery && ctx.from) {
-      await stopDisabledAnonSession(ctx.from.id, ctx);
-    }
-
-    const callback = ctx.callbackQuery?.data;
-    if (
-      callback &&
-      (callback === "menu:anon" || /^(anon:|dm:|pp:(?:dm|chat|notify):)/.test(callback))
-    ) {
-      await ctx.answerCallbackQuery({ text: "این بخش فعلاً در دسترس نیست." }).catch(() => {});
-      await ctx.deleteMessage().catch(() => {});
-      await clearLegacyReplyKeyboard(ctx);
-      await ctx.reply(WELCOME, { ...HTML, reply_markup: await menuFor(ctx) });
-      return;
-    }
-
-    const input = ctx.message?.text?.trim();
-    if (
-      input &&
-      (DISABLED_ANON_BUTTONS.has(input) ||
-        /^\/(?:end|delet_chat_[a-z0-9]{5})(?:@\w+)?(?:\s|$)/i.test(input))
-    ) {
-      await stopDisabledAnonSession(ctx.from!.id, ctx);
-      await ctx.reply("این گزینه در منوی فعلی وجود ندارد.", { reply_markup: idleKb });
-      return;
-    }
-    await next();
-  });
 
   // ================= دستورهای عمومی =================
 
   bot.command("start", async (ctx) => {
     await resetState(ctx);
-    if (ANONYMOUS_FEATURES_ENABLED && (await handleStartPayload(ctx))) return;
     await ctx.reply(WELCOME, { ...HTML, reply_markup: await menuFor(ctx) });
   });
 
@@ -808,60 +506,18 @@ export function getBot() {
     await ctx.reply(RULES_TEXT, HTML);
   });
 
-  // تنظیم حالت سایلنت
-  bot.command("silent", async (ctx) => {
-    const uid = ctx.from?.id;
-    if (!uid) return;
-    const on = await toggleSilent(uid);
-    if (on === null) return;
-    await ctx.reply(on ? "🔕 حالت سایلنت روشن شد." : "🔔 حالت سایلنت خاموش شد.");
-  });
-
-  // ================= چت ناشناس =================
-
-  // دکمه‌های کیبورد ثابت پایین
-  bot.hears(BTN.connect, showAnonOptions);
-  bot.hears(BTN.cancel, endAnon); // لغو جستجو (کیبورد قدیمی)
-  bot.hears(BTN.end, askEnd); // «پایان چت» ← سؤال تأیید
-  bot.command("end", askEnd);
-  bot.hears(BTN.next, async (ctx) => {
-    await endAnon(ctx);
-    await startAnon(ctx);
-  });
-
-  // 👀 پروفایل مخاطب: پروفایل طرف مقابل برای من، و اعلان «پروفایلت دیده شد» برای او
-  bot.hears(BTN.peer, async (ctx) => {
-    const uid = ctx.from!.id;
-    const a = await getAnon(uid);
-    if (a?.state !== "chatting" || !a.partnerId) {
-      return void (await ctx.reply("الان چت فعالی نداری.", { reply_markup: idleKb }));
+  // دکمه‌های قدیمیِ بخش حذف‌شده (پیام‌های قدیمی که هنوز در چت کاربران هستند)
+  bot.callbackQuery(
+    /^(?:menu:anon|anon:.+|dm:.+|pp:(?:dm|chat|notify):\d+|rep:chat:\d+)$/,
+    async (ctx) => {
+      await ctx.answerCallbackQuery({ text: "این بخش دیگر وجود ندارد." }).catch(() => {});
+      if (/^(?:menu:anon|anon:|dm:)/.test(ctx.callbackQuery.data)) {
+        await ctx.deleteMessage().catch(() => {});
+      }
     }
-    const target = await getUserRow(a.partnerId);
-    if (!target) return;
-    await sendPeerProfile(ctx, target, uid, await isAdminUser(uid));
-    await ctx.api.sendMessage(a.partnerId, PROFILE_VIEWED, HTML).catch(() => {});
-  });
+  );
 
-  // 🔒 چت ایمن (فعلاً بدون عملکرد)
-  bot.hears(BTN.safe, async (ctx) => {
-    await ctx.reply("این بخش به‌زودی فعال می‌شود 🚧");
-  });
-
-  // 🗑 حذف پیام‌های چت از هر دو طرف
-  bot.hears(/^\/delet_chat_([a-z0-9]{5})$/, async (ctx) => {
-    const uid = ctx.from!.id;
-    const chat = await getChatByCode(ctx.match[1]);
-    if (!chat || (chat.userA !== uid && chat.userB !== uid)) {
-      return void (await ctx.reply("چتی با این کد پیدا نشد."));
-    }
-    if (!chat.endedAt) return void (await ctx.reply("این چت هنوز فعال است."));
-    const n = await deleteChatMessages(ctx.api, chat.id);
-    await ctx.reply(
-      n > 0
-        ? `🗑 پیام‌های چت از هر دو طرف حذف شد. (${n} پیام)`
-        : "پیامی برای حذف باقی نمانده. (فقط پیام‌های ۴۸ ساعت اخیر حذف می‌شوند)"
-    );
-  });
+  // ================= کیبورد ثابت پایین =================
 
   bot.hears(BTN.menu, showHome);
   bot.hears(BTN.help, async (ctx) => {
@@ -894,7 +550,7 @@ export function getBot() {
     });
   });
 
-    // دیدن پروفایل با /user_xxxxxxxx
+  // دیدن پروفایل با /user_xxxxxxxx
   bot.hears(/^\/user_([A-Za-z0-9]{8})$/, async (ctx) => {
     const target = await getUserByPublicId(ctx.match[1]);
     if (!target) return void (await ctx.reply("کاربری با این آیدی پیدا نشد."));
@@ -902,180 +558,19 @@ export function getBot() {
     await sendPeerProfile(ctx, target, viewer, await isAdminUser(viewer));
   });
 
-
-  if (ANONYMOUS_FEATURES_ENABLED) {
-    bot.hears(BTN.link, async (ctx) => {
-      await resetState(ctx);
-      await sendMyLink(ctx);
-    });
-  }
-
-  // دکمه‌های کیبورد پایین که هنوز بخشی پشتشان نیست
-  bot.hears([BTN.search, BTN.nearby, BTN.feedback], async (ctx) => {
+  // دکمه‌ی کیبورد پایین که هنوز بخشی پشتش نیست
+  bot.hears(BTN.feedback, async (ctx) => {
     await resetState(ctx);
     await ctx.reply("این بخش به‌زودی فعال می‌شود 🚧");
   });
-
 
   // دکمه‌های اینلاین پروفایل که هنوز بخشی پشتشان نیست
   bot.callbackQuery(/^pf:(?!edit$)/, async (ctx) => {
     await ctx.answerCallbackQuery({ text: "این بخش به‌زودی فعال می‌شود 🚧" });
   });
 
-  // دکمه‌های اینلاین پنل جستجوی ناشناس
-  bot.callbackQuery("anon:random", async (ctx) => {
-    await ctx.answerCallbackQuery();
-    await ctx.deleteMessage().catch(() => {});
-    await startAnon(ctx); // همان منطق صف قبلی
-  });
-
-  // ❌ لغو جستجو (دکمه‌ی شیشه‌ای زیر پیام جستجو)
-  bot.callbackQuery("anon:cancel", async (ctx) => {
-    const ok = await cancelSearch(ctx.from.id);
-    await ctx.answerCallbackQuery(ok ? undefined : { text: "الان در حال جستجو نیستی." });
-    await ctx.deleteMessage().catch(() => {});
-    if (ok) await ctx.reply("جستجو لغو شد.", { reply_markup: idleKb });
-  });
-
-  // ادامه چت: فقط پیام تأیید پاک می‌شود
-  bot.callbackQuery("anon:keep", async (ctx) => {
-    await ctx.answerCallbackQuery();
-    await ctx.deleteMessage().catch(() => {});
-  });
-
-  // اتمام چت: قبل از ۱۰ ثانیه از شروع چت، خطا (alert) نشان داده می‌شود
-  bot.callbackQuery("anon:end", async (ctx) => {
-    const a = await getAnon(ctx.from.id);
-    if (a?.state !== "chatting") {
-      await ctx.answerCallbackQuery({ text: "الان چت فعالی نداری." });
-      return void (await ctx.deleteMessage().catch(() => {}));
-    }
-
-    const chat = a.chatId ? await getChat(a.chatId) : null;
-    if (chat) {
-      const elapsed = (Date.now() - chat.startedAt.getTime()) / 1000;
-      if (elapsed < MIN_CHAT_SEC) {
-        const wait = Math.ceil(MIN_CHAT_SEC - elapsed);
-        return void (await ctx.answerCallbackQuery({
-          text: `⚠️ خطا: امکان پایان چت تا ${MIN_CHAT_SEC} ثانیه پس از وصل شدن ممکن نیست! لطفا ${wait} ثانیه دیگر برای پایان چت صبر کنید.`,
-          show_alert: true,
-        }));
-      }
-    }
-
-    await ctx.answerCallbackQuery();
-    await ctx.deleteMessage().catch(() => {});
-    await endAnon(ctx);
-  });
-
-
-  // جستجوی پسر / دختر (۲ سکه، فقط هنگام اتصال)
-  bot.callbackQuery(/^anon:(boy|girl)$/, async (ctx) => {
-    await ctx.answerCallbackQuery();
-    await ctx.deleteMessage().catch(() => {});
-    await startAnon(ctx, { scope: null, gender: ctx.match[1] === "boy" ? "m" : "f" });
-  });
-
-  // پنل دوم: هم‌استانی / هم‌سنی (شانسی رایگان، پسر/دختر ۲ سکه)
-  const subPanelKb = (k: "p" | "a") =>
-    new InlineKeyboard()
-      .text("🎲 جستجوی شانسی", `anon:${k}:r`)
-      .row()
-      .text("👱‍♂️ جستجوی پسر", `anon:${k}:b`)
-      .text("👩‍🦰 جستجوی دختر", `anon:${k}:g`);
-
-  bot.callbackQuery(/^anon:(province|age)$/, async (ctx) => {
-    await ctx.answerCallbackQuery();
-    const k = ctx.match[1] === "age" ? "a" : "p";
-    const who = k === "a" ? "هم سنی" : "هم استانی";
-    await editOrReply(
-      ctx,
-      `چه کسی رو از ${who} هات پیدا کنم؟ <code>انتخاب کن</code>👇`,
-      subPanelKb(k)
-    );
-  });
-
-  bot.callbackQuery(/^anon:(p|a):(r|b|g)$/, async (ctx) => {
-    await ctx.answerCallbackQuery();
-    await ctx.deleteMessage().catch(() => {});
-    const [, k, g] = ctx.match;
-    await startAnon(ctx, {
-      scope: k === "p" ? "province" : "age",
-      gender: g === "b" ? "m" : g === "g" ? "f" : null,
-    });
-  });
-
-  bot.callbackQuery("anon:nearby", async (ctx) => {
-    await ctx.answerCallbackQuery({ text: "این بخش به‌زودی فعال می‌شود 🚧" });
-  });
-
-  // رد و بدل پیام بین دو نفر (متن، عکس، ویس، استیکر، ...).
-  // باید قبل از handlerهای ویس/استیکر/متن بیاید.
-  // copyMessage فرستنده را نشان نمی‌دهد (پیام «فوروارد‌شده» نیست).
- 
-bot.on("message", async (ctx, next) => {
-  if (ctx.message.text?.startsWith("/")) return next();
-
-  const a = await getAnon(ctx.from.id);
-  if (!ANONYMOUS_FEATURES_ENABLED && a) {
-    const result = await leaveChat(ctx.from.id);
-    if (result.was === "chatting" && result.partnerId) {
-      await ctx.api
-        .sendMessage(result.partnerId, "این بخش فعلاً در دسترس نیست.", { reply_markup: idleKb })
-        .catch((error) =>
-          console.warn("disabled chat partner notification failed:", error instanceof Error ? error.message : "unknown")
-        );
-    }
-    await ctx.reply("این بخش فعلاً در دسترس نیست.", { reply_markup: idleKb });
-    return;
-  }
-  if (a?.state !== "chatting" || !a.partnerId) return next();
-
-  // محدودیت سخت‌گیرانه برای ارسال پیام به طرف مقابل
-  if (!(await checkRate("relay", ctx.from.id))) {
-    if (await shouldWarn(ctx.from.id)) {
-      await ctx.reply(
-        "⏳ پیام‌هایت خیلی سریع است؛ این پیام ارسال نشد."
-      ).catch(() => {});
-    }
-    return;
-  }
-
-  try {
-    const sent = await ctx.api.copyMessage(
-      a.partnerId,
-      ctx.chat.id,
-      ctx.message.message_id
-    );
-
-    // ذخیره آیدی پیام‌ها برای حذف پیام‌ها از هر دو طرف
-    if (a.chatId) {
-      await logMessages(a.chatId, [
-        { userId: ctx.from.id, messageId: ctx.message.message_id, fromId: ctx.from.id },
-        { userId: a.partnerId, messageId: sent.message_id, fromId: ctx.from.id },
-      ]).catch((e) => console.error("logMessages error:", e));
-    }
-  } catch (e) {
-    if (e instanceof GrammyError && e.error_code === 403) {
-      // طرف مقابل ربات را بلاک کرده
-      await leaveChat(ctx.from.id);
-      await ctx.reply(
-        "🛑 طرف مقابل در دسترس نیست؛ چت تمام شد.",
-        { reply_markup: idleKb }
-      );
-    } else {
-      console.error(
-        "anon relay error:",
-        e instanceof Error ? e.message : "unknown"
-      );
-      await ctx.reply("⚠️ پیام ارسال نشد. دوباره بفرست.");
-    }
-  }
-});
-
-if (ANONYMOUS_FEATURES_ENABLED) registerAnonLink(bot);
-registerProfileEdit(bot);
-registerReports(bot);
+  registerProfileEdit(bot);
+  registerReports(bot);
 
   // ================= تکمیل پروفایل =================
 
@@ -1118,14 +613,9 @@ registerReports(bot);
       console.error("profile reward error:", e);
       return null;
     });
-    await ctx.reply(
-      "✅ پروفایلت کامل شد!" +
-        (reward ? `\n🎁 ${reward} سکه هدیه گرفتی.` : "") +
-        (ANONYMOUS_FEATURES_ENABLED
-          ? "\nحالا می‌تونی «💬 به یه ناشناس وصلم کن!» رو بزنی."
-          : ""),
-      { reply_markup: idleKb }
-    );
+    await ctx.reply("✅ پروفایلت کامل شد!" + (reward ? `\n🎁 ${reward} سکه هدیه گرفتی.` : ""), {
+      reply_markup: idleKb,
+    });
   });
 
   // ================= بخش ادمین =================
@@ -1261,13 +751,6 @@ registerReports(bot);
     }
     await editOrReply(ctx, WELCOME, await menuFor(ctx));
   });
-
-  if (ANONYMOUS_FEATURES_ENABLED) {
-    bot.callbackQuery("menu:anon", async (ctx) => {
-      await ctx.answerCallbackQuery();
-      await showAnonOptions(ctx);
-    });
-  }
 
   bot.callbackQuery("menu:help", async (ctx) => {
     await ctx.answerCallbackQuery();
@@ -1462,18 +945,28 @@ registerReports(bot);
     }
   });
 
+  // ذخیره/حذف از ذخیره‌ها: فقط برچسب دکمه عوض می‌شود و بقیه‌ی کیبورد (قبلی/بعدی و ...) دست‌نخورده می‌ماند
   bot.callbackQuery(/^news:favorite:([a-f0-9]{16})$/, async (ctx) => {
     try {
-      const feed = await getNewsFeed();
-      const story = feed.stories.find((item) => item.id === ctx.match[1]);
-      if (!story) {
-        await ctx.answerCallbackQuery({ text: "خبر دیگر در فهرست نیست." });
-        await renderNewsHome(ctx);
-        return;
-      }
-      const favorited = await toggleNewsFavorite(ctx.from.id, story.id);
+      const storyId = ctx.match[1];
+      const favorited = await toggleNewsFavorite(ctx.from.id, storyId);
       await ctx.answerCallbackQuery({ text: favorited ? "خبر ذخیره شد ⭐" : "از ذخیره‌ها حذف شد" });
-      await showNewsCard(ctx, feed, [story], 0);
+
+      const message = ctx.callbackQuery.message;
+      const rows =
+        message && "reply_markup" in message ? message.reply_markup?.inline_keyboard : undefined;
+      if (!rows) return;
+      const target = `news:favorite:${storyId}`;
+      const inline_keyboard = rows.map((row) =>
+        row.map((button) =>
+          "callback_data" in button && button.callback_data === target
+            ? { ...button, text: favorited ? "⭐ ذخیره‌شده" : "☆ ذخیره خبر" }
+            : button
+        )
+      );
+      await ctx.editMessageReplyMarkup({ reply_markup: { inline_keyboard } }).catch((e) => {
+        if (!isNotModified(e)) throw e;
+      });
     } catch (error) {
       await ctx.answerCallbackQuery().catch(() => {});
       await reportNewsError(ctx, error);

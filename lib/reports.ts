@@ -2,9 +2,8 @@ import { and, count, eq } from "drizzle-orm";
 import { InlineKeyboard, Keyboard, type Bot, type Context } from "grammy";
 import { getDb } from "./db";
 import { bans, cache, reports, users } from "./schema";
-import { ANONYMOUS_FEATURES_ENABLED, COINS } from "./config";
+import { COINS } from "./config";
 import { addCoins } from "./coins";
-import { findLastChatBetween, getAnon, snapshotChat } from "./anon";
 import { isAdminUser, ownerId } from "./admins";
 import { ensurePublicId, getUserRow } from "./userProfile";
 import { idleKb } from "./menu";
@@ -16,20 +15,15 @@ const HTML = { parse_mode: "HTML" as const };
 const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 const REPORT_BACK = "🔙 بازگشت";
 
+// ترتیب این لیست با ایندکس داخل callback (rr:{i}:{target}) هماهنگ است؛ ترتیب را عوض نکن
 const REASONS = [
   { btn: "تبلیغات سایت ها و ربات ها و کانال ها", why: "تبلیغات سایت‌ها و ربات‌ها و کانال‌ها" },
-  ...(ANONYMOUS_FEATURES_ENABLED
-    ? [{ btn: "ارسال محتوای غیراخلاقی در چت", why: "ارسال محتوای غیراخلاقی در چت" }]
-    : []),
   { btn: "ایجاد مزاحمت", why: "ایجاد مزاحمت" },
   { btn: "پخش شماره موبایل یا اطلاعات شخصی دیگران", why: "پخش شماره موبایل یا اطلاعات شخصی دیگران" },
   { btn: "کلمات یا عکس غیر اخلاقی و یا توهین آمیز در پروفایل", why: "کلمات یا عکس غیر اخلاقی و یا توهین آمیز در پروفایل" },
   { btn: "جنسیت اشتباه در پروفایل", why: "جنسیت اشتباه در پروفایل" },
   { btn: "دیگر موارد...", why: "دیگر موارد" },
 ];
-
-const CHATTING_ERR =
-  "⚠️ خطا : هم اکنون شما در حال چت هستید !\n\n<code>برای استفاده از ربات ابتدا باید مکالمه رو قطع کنی 👇</code>";
 
 const WARN =
   "تمامی گزارشات بررسی خواهند شد و 🔴 ارسال گزارشات اشتباه موجب مسدود شدن شما خواهد شد.";
@@ -106,9 +100,7 @@ async function createReport(p: { reporterId: number; targetId: number; reason: s
     .limit(1);
   if (dup) return "duplicate" as const;
 
-  const chat = await findLastChatBetween(p.reporterId, p.targetId);
-  const evidence = chat ? await snapshotChat(chat.id, p.reporterId) : null;
-  await db.insert(reports).values({ ...p, chatId: chat?.id ?? null, evidence });
+  await db.insert(reports).values(p);
   return "ok" as const;
 }
 
@@ -135,7 +127,7 @@ export function registerReports(bot: Bot) {
   });
 
   // دکمه‌های بدون عملکرد هنوز
-  bot.callbackQuery(/^pp:(gift|dm|chat|block|add|notify):\d+$/, async (ctx) => {
+  bot.callbackQuery(/^pp:(gift|block|add):\d+$/, async (ctx) => {
     await ctx.answerCallbackQuery({ text: "این بخش به‌زودی فعال می‌شود 🚧" });
   });
 
@@ -145,9 +137,6 @@ export function registerReports(bot: Bot) {
     const me = ctx.from.id;
     const target = Number(ctx.match[1]);
 
-    if (ANONYMOUS_FEATURES_ENABLED && (await getAnon(me))?.state === "chatting") {
-      return void (await ctx.reply(CHATTING_ERR, { ...HTML, ...quoteMsg(ctx) }));
-    }
     if (target === me) return void (await ctx.reply("خودت را نمی‌توانی گزارش کنی 😅"));
     const t = await getUserRow(target);
     if (!t) return void (await ctx.reply("کاربر پیدا نشد."));
@@ -177,10 +166,6 @@ export function registerReports(bot: Bot) {
     if (!reason) return void (await ctx.answerCallbackQuery());
     await ctx.answerCallbackQuery();
 
-    if (ANONYMOUS_FEATURES_ENABLED && (await getAnon(me))?.state === "chatting") {
-      return void (await ctx.reply(CHATTING_ERR, HTML));
-    }
-
     await setReport(me, { target, reason: reason.why });
     await ctx.deleteMessage().catch(() => {});
     await ctx.reply(WARN);
@@ -189,9 +174,7 @@ export function registerReports(bot: Bot) {
         `⚠️ فرم ارسال گزارش عدم رعایت قوانین به دلیل ${reason.why}`,
         "",
         "<code>خب حالا کافیه یه توضیح دقیق و 《کامل》 درباره گزارشت بفرستی تا ثبتش کنم.</code>",
-        ANONYMOUS_FEATURES_ENABLED
-          ? "<code>- مثلا : داره تبلیغات فلان کانال رو توی چت ( یا پروفایلش ) میکنه.</code>"
-          : "<code>- مثلا : داره تبلیغات فلان کانال رو توی پروفایلش میکنه.</code>",
+        "<code>- مثلا : داره تبلیغات فلان کانال رو توی پروفایلش میکنه.</code>",
         "",
         `برای لغو گزارش 《 ${REPORT_BACK} 》 را انتخاب کنید 👇`,
       ].join("\n"),
@@ -260,8 +243,6 @@ export function registerReports(bot: Bot) {
     ].join("\n");
 
     const kb = new InlineKeyboard()
-      .text("👁 مشاهده چت", `rep:chat:${r.id}`)
-      .row()
       .text("✅ تایید تخلف", `rep:ok:${r.id}`)
       .text("⛔️ تایید و مسدودسازی", `rep:ban:${r.id}`)
       .row()
@@ -277,41 +258,13 @@ export function registerReports(bot: Bot) {
     await showReport(ctx);
   });
 
-  async function sendEvidence(ctx: Context, r: typeof reports.$inferSelect) {
-    const ev = (r.evidence as { m: number; f: number | null }[] | null) ?? [];
-    if (ev.length === 0) {
-      return void (await ctx.reply("چتی برای این گزارش ذخیره نشده (گزارش از طریق پروفایل بوده یا چت قدیمی است)."));
-    }
-    // پیام‌های پشت‌سرهم از یک فرستنده، یک دسته
-    const runs: { who: "r" | "t" | "?"; ids: number[] }[] = [];
-    for (const e of ev) {
-      const who = e.f === r.reporterId ? "r" : e.f === r.targetId ? "t" : "?";
-      const last = runs[runs.length - 1];
-      if (last && last.who === who && last.ids.length < 100) last.ids.push(e.m);
-      else runs.push({ who, ids: [e.m] });
-    }
-    await ctx.reply("🗂 چت گزارش (۱۵۰ پیام آخر؛ پیام‌هایی که حذف شده باشند نمایش داده نمی‌شوند):");
-    for (const run of runs) {
-      const label = run.who === "r" ? "👤 گزارش‌دهنده:" : run.who === "t" ? "🚨 گزارش‌شده:" : "❔ نامشخص:";
-      await ctx.reply(label);
-      await ctx.api.copyMessages(ctx.chat!.id, r.reporterId, run.ids).catch((e) =>
-        console.error("evidence copy error:", e instanceof Error ? e.message : "unknown")
-      );
-    }
-  }
-
-  bot.callbackQuery(/^rep:(chat|ok|ban|no):(\d+)$/, async (ctx) => {
+  bot.callbackQuery(/^rep:(ok|ban|no):(\d+)$/, async (ctx) => {
     if (!(await adminOnly(ctx))) return;
     const act = ctx.match[1];
     const id = Number(ctx.match[2]);
     const db = getDb();
     const [r] = await db.select().from(reports).where(eq(reports.id, id));
     if (!r) return void (await ctx.answerCallbackQuery({ text: "گزارش پیدا نشد" }));
-
-    if (act === "chat") {
-      await ctx.answerCallbackQuery({ text: "در حال ارسال…" });
-      return void (await sendEvidence(ctx, r));
-    }
 
     const status = act === "no" ? "rejected" : "confirmed";
     const upd = await db

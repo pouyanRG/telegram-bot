@@ -58,6 +58,7 @@ export async function GET(request: Request) {
         const text = formatNewsItem(story, 0, 1);
         const options = {
           parse_mode: "HTML" as const,
+          disable_notification: true,
           reply_markup: { inline_keyboard: [[{ text: "📰 خبرهای بیشتر", callback_data: "menu:news" }]] },
         };
         try {

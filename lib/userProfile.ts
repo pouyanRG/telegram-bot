@@ -42,7 +42,6 @@ export const profileKb = new InlineKeyboard()
   .text("مشاهده لایک کننده ها ❤️", "pf:likers")
   .row()
   .text("🚫 بلاک لیست ❗️", "pf:blocks")
-  .text("👥 گفت و گو های اخیر", "pf:recent")
   .row()
   .text("📌 موقعیت مکانی", "pf:location")
   .text("👫 دوستان", "pf:friends")
@@ -69,9 +68,7 @@ function buildCaption(
     `${RLM}تعداد لایک ها : ${u.likesCount}`,
   ];
   if (u.bio) lines.push("", `${RLM}📝 ${esc(u.bio)}`);
-  if (isSelf) {
-    lines.push("", `${RLM}تنظیم حالت سایلنت : /silent`);
-  } else {
+  if (!isSelf) {
     const joined = u.createdAt.toLocaleDateString("fa-IR", { timeZone: "Asia/Tehran" });
     lines.push("", `${RLM}📅 تاریخ عضویت: ${joined}`);
   }
@@ -132,12 +129,4 @@ export async function getUserRow(userId: number) {
 export async function getUserByPublicId(publicId: string) {
   const [u] = await getDb().select().from(users).where(eq(users.publicId, publicId));
   return u ?? null;
-}
-
-export async function toggleSilent(userId: number) {
-  const u = await getUserRow(userId);
-  if (!u) return null;
-  const next = !u.silent;
-  await getDb().update(users).set({ silent: next }).where(eq(users.telegramId, userId));
-  return next;
 }

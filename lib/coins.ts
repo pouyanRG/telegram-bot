@@ -7,19 +7,10 @@ import { COINS } from "./config";
 export type CoinReason =
   | "opening_balance"
   | "profile_reward"
-  | "referral_join"
-  | "referral_complete"
   | "report_reward"
   | "purchase"
   | "daily_bonus"
-  | "gender_search"
-  | "direct_message"
-  | "chat_request"
-  | "notify_online"
-  | "notify_chat_end"
-  | "new_bio"
-  | "admin_adjust"
-  | "refund";
+  | "admin_adjust";
 
 type Db = ReturnType<typeof getDb>;
 /** نوع tx داخل getDb().transaction(...) */

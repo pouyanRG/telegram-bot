@@ -10,7 +10,6 @@ async function housekeeping() {
   const db = getDb();
   const steps = [
     sql`delete from processed_updates where created_at < now() - interval '2 days'`,
-    sql`delete from anon_messages where created_at < now() - interval '3 days'`,
     sql`delete from cache
         where (key like 'admin_login:%'
                and (data->>'resetAt')::bigint < (extract(epoch from now()) * 1000)::bigint)
@@ -19,9 +18,7 @@ async function housekeeping() {
            or (key like 'report:%' and updated_at < now() - interval '1 day')
            or (key like 'pending_defphoto:%' and updated_at < now() - interval '1 day')
            or (key like 'coin:%' and updated_at < now() - interval '1 day')
-           or (key like 'pedit:%' and updated_at < now() - interval '1 day')
-           or (key like 'dm:%' and updated_at < now() - interval '1 day')
-           or (key like 'news:%' and updated_at < now() - interval '1 day')`,
+           or (key like 'pedit:%' and updated_at < now() - interval '1 day')`,
     sql`delete from quotas where day < to_char(now() - interval '30 days', 'YYYY-MM-DD')`,
     sql`delete from voice_jobs
         where status <> 'processing' and created_at < now() - interval '30 days'`,
