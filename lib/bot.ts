@@ -335,7 +335,7 @@ async function getNewsListStories(userId: number, feed: NewsFeed, kind: NewsList
   );
 }
 
-const NEWS_PAGE_SIZE = 8;
+const NEWS_PAGE_SIZE = 5;
 
 function newsListTitle(kind: NewsListKind) {
   switch (kind) {
@@ -378,7 +378,7 @@ async function showNewsList(ctx: Context, feed: NewsFeed, kind: NewsListKind, pa
   const keyboard = new InlineKeyboard();
   const headlines = visibleStories.map((story, index) => {
     const number = (start + index + 1).toLocaleString("fa-IR");
-    return `${number}. ${formatNewsTitle(story.title, 110)}`;
+    return `<blockquote>${number}. ${formatNewsTitle(story.title, 110)}</blockquote>`;
   });
   visibleStories.forEach((story, index) => {
     const number = (start + index + 1).toLocaleString("fa-IR");
@@ -401,11 +401,10 @@ async function showNewsList(ctx: Context, feed: NewsFeed, kind: NewsListKind, pa
     newsListTitle(kind),
     position,
     "",
-    ...headlines,
-    "",
+    headlines.join("\n\n"),
     "برای خواندن متن کامل، شمارهٔ همان خبر را بزن.",
     staleNotice,
-  ].filter(Boolean).join("\n");
+  ].filter(Boolean).join("\n\n");
   await editOrReply(ctx, listText, keyboard);
 }
 
