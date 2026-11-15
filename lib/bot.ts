@@ -8,6 +8,7 @@ import {
   getNewsSelection,
   getNewsUserState,
   markNewsRead,
+  refreshNewsFeed,
   setNewsAlertsEnabled,
   setNewsSelection,
   toggleNewsFavorite,
@@ -118,6 +119,8 @@ function normalizeFa(s: string) {
 
 const homeKb = new InlineKeyboard().text("🏠 منوی اصلی", "menu:home");
 
+type NewsListKind = "all" | "unread" | "favorites" | "history";
+
 const pricesKb = new InlineKeyboard()
   .text("🔄 بروزرسانی", "prices:refresh")
   .row()
@@ -127,11 +130,15 @@ const cancelStickerKb = new InlineKeyboard().text("❌ انصراف", "admin:sti
 function newsHomeKb() {
   const kb = new InlineKeyboard();
   return kb
-    .text("📰 مشاهده همه", "news:show")
-    .text("🆕 خبرهای جدید", "news:unread")
+    .text("📰 همه خبرها", "news:list:all:0")
+    .text("🆕 خبرهای جدید", "news:list:unread:0")
     .row()
-    .text("📚 خوانده‌شده‌ها", "news:history")
-    .text("⚙️ تنظیمات", "news:settings");
+    .text("⭐ ذخیره‌ها", "news:list:favorites:0")
+    .text("📚 خوانده‌شده‌ها", "news:list:history:0")
+    .row()
+    .text("🔄 تازه‌سازی و نمایش", "news:refresh")
+    .row()
+    .text("⚙️ تنظیمات خبرها", "news:settings");
 }
 
 function newsSettingsKb(alertsEnabled: boolean) {
@@ -158,7 +165,12 @@ function newsCategoriesKb(categories: NewsCategory[], selected: string[]) {
 }
 
 function newsHomeText() {
-  return "📰 <b>اخبار روز</b>\nیکی از گزینه‌های زیر را انتخاب کن:";
+  return [
+    "📰 <b>اخبار روز</b>",
+    "",
+    "خبرها را بر اساس وضعیت دلخواهت ببین؛ برای مطالعهٔ خبر روی عنوانش بزن.",
+    "خبرهای جدید بر اساس دسته‌هایی هستند که در تنظیمات انتخاب کرده‌ای.",
+  ].join("\n");
 }
 
 function newsSettingsText(alertsEnabled: boolean) {
@@ -177,16 +189,26 @@ function newsCategoriesText(selectedCount: number, total: number) {
   ].join("\n");
 }
 
-function newsCardKeyboard(index: number, total: number, storyId: string, isFavorite: boolean) {
+function newsCardKeyboard(
+  index: number,
+  stories: NewsStory[],
+  storyId: string,
+  isFavorite: boolean,
+  listKind: NewsListKind
+) {
   const kb = new InlineKeyboard();
-  if (index > 0) kb.text("⬅️ قبلی", `news:view:${index - 1}`);
-  if (index + 1 < total) kb.text("بعدی ➡️", `news:view:${index + 1}`);
-  if (index > 0 || index + 1 < total) kb.row();
+  if (index > 0) kb.text("⬅️ خبر قبلی", `news:open:${listKind}:${stories[index - 1].id}`);
+  if (index + 1 < stories.length) {
+    kb.text("خبر بعدی ➡️", `news:open:${listKind}:${stories[index + 1].id}`);
+  }
+  if (index > 0 || index + 1 < stories.length) kb.row();
   kb.text(isFavorite ? "⭐ ذخیره‌شده" : "☆ ذخیره خبر", `news:favorite:${storyId}`)
     .row()
-    .text("⭐ ذخیره‌ها", "news:favorites")
+    .url("🔗 متن کامل خبر", stories[index].url)
     .row()
-    .text("⚙️ تنظیمات", "news:settings")
+    .text("⭐ ذخیره‌ها", "news:list:favorites:0")
+    .text("⬅️ فهرست خبرها", `news:list:${listKind}:${Math.floor(index / NEWS_PAGE_SIZE)}`)
+    .row()
     .text("🏠 منو", "menu:home");
   return kb;
 }
@@ -297,32 +319,81 @@ async function renderNewsCategories(ctx: Context, feed: NewsFeed) {
   );
 }
 
-async function showNewsList(ctx: Context, title: string, stories: NewsStory[]) {
+async function getNewsListStories(userId: number, feed: NewsFeed, kind: NewsListKind) {
+  if (kind === "all") return feed.stories;
+  const state = await getNewsUserState(userId);
+  if (kind === "favorites") {
+    return feed.stories.filter((story) => state.favoriteIds.includes(story.id));
+  }
+  if (kind === "history") {
+    return feed.stories.filter((story) => state.readIds.includes(story.id));
+  }
+  const selected = new Set(await getNewsSelection(userId, feed.categories));
+  return feed.stories.filter(
+    (story) => selected.has(story.categoryId) && !state.readIds.includes(story.id)
+  );
+}
+
+const NEWS_PAGE_SIZE = 8;
+
+function newsListTitle(kind: NewsListKind) {
+  switch (kind) {
+    case "all": return "📰 <b>همهٔ خبرها</b>";
+    case "unread": return "🆕 <b>خبرهای جدید و خوانده‌نشده</b>";
+    case "favorites": return "⭐ <b>خبرهای ذخیره‌شده</b>";
+    case "history": return "📚 <b>خبرهای خوانده‌شده</b>";
+  }
+}
+
+async function showNewsList(ctx: Context, feed: NewsFeed, kind: NewsListKind, page = 0) {
+  const stories = await getNewsListStories(ctx.from!.id, feed, kind);
+  if (
+    kind === "unread" &&
+    !stories.length &&
+    !(await getNewsSelection(ctx.from!.id, feed.categories)).length
+  ) {
+    await renderNewsCategories(ctx, feed);
+    return;
+  }
   if (!stories.length) {
     await editOrReply(
       ctx,
-      `${title}\n\nفعلاً خبری در این فهرست نیست.`,
-      new InlineKeyboard().text("⚙️ تنظیمات", "news:settings").text("🏠 اخبار روز", "menu:news")
+      `${newsListTitle(kind)}\n\nفعلاً خبری در این فهرست نیست.`,
+      new InlineKeyboard()
+        .text(
+          kind === "unread" ? "🏷 انتخاب دسته‌ها" : "⚙️ تنظیمات خبرها",
+          kind === "unread" ? "news:categories" : "news:settings"
+        )
+        .row()
+        .text("⬅️ اخبار روز", "menu:news")
     );
     return;
   }
 
-  const visibleStories = stories.slice(0, 12);
-  const storyLines = visibleStories.map((story, index) => {
-    const characters = Array.from(story.title);
-    const title = characters.slice(0, 160).join("");
-    const safeTitle = title.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-    const number = (index + 1).toLocaleString("fa-IR");
-    return `${number}. ${safeTitle}${characters.length > 160 ? "…" : ""}`;
-  });
+  const pageCount = Math.ceil(stories.length / NEWS_PAGE_SIZE);
+  const currentPage = Math.min(Math.max(0, page), pageCount - 1);
+  const start = currentPage * NEWS_PAGE_SIZE;
+  const visibleStories = stories.slice(start, start + NEWS_PAGE_SIZE);
   const keyboard = new InlineKeyboard();
-  visibleStories.forEach((story, index) => {
-    keyboard.text(`📰 ${(index + 1).toLocaleString("fa-IR")}`, `news:open:${story.id}`);
-    if ((index + 1) % 3 === 0) keyboard.row();
+  visibleStories.forEach((story) => {
+    const characters = Array.from(story.title);
+    const title = characters.slice(0, 48).join("");
+    keyboard
+      .text(`📰 ${title}${characters.length > 48 ? "…" : ""}`, `news:open:${kind}:${story.id}`)
+      .row();
   });
-  if (visibleStories.length % 3 !== 0) keyboard.row();
-  keyboard.text("⚙️ تنظیمات", "news:settings").text("🏠 اخبار روز", "menu:news");
-  await editOrReply(ctx, `${title}\n\n${storyLines.join("\n")}`, keyboard);
+  if (currentPage > 0) keyboard.text("⬅️ قبلی", `news:page:${kind}:${currentPage - 1}`);
+  if (currentPage + 1 < pageCount) {
+    keyboard.text("بعدی ➡️", `news:page:${kind}:${currentPage + 1}`);
+  }
+  if (currentPage > 0 || currentPage + 1 < pageCount) keyboard.row();
+  keyboard
+    .text("⚙️ تنظیمات خبرها", "news:settings")
+    .text("⬅️ اخبار روز", "menu:news");
+
+  const position = `صفحهٔ ${(currentPage + 1).toLocaleString("fa-IR")} از ${pageCount.toLocaleString("fa-IR")} · ${stories.length.toLocaleString("fa-IR")} خبر`;
+  const staleNotice = feed.stale ? "\n\n⚠️ فید تازه نشد؛ خبرهای ذخیره‌شده را می‌بینی." : "";
+  await editOrReply(ctx, `${newsListTitle(kind)}\n${position}${staleNotice}`, keyboard);
 }
 
 async function reportNewsError(ctx: Context, error: unknown) {
@@ -338,7 +409,8 @@ async function showNewsCard(
   ctx: Context,
   feed: NewsFeed,
   stories: NewsStory[],
-  index: number
+  index: number,
+  listKind: NewsListKind
 ) {
   const story = stories[index];
   if (!story) return;
@@ -348,7 +420,13 @@ async function showNewsCard(
     : body;
   const userId = ctx.from!.id;
   const state = await getNewsUserState(userId);
-  const keyboard = newsCardKeyboard(index, stories.length, story.id, state.favoriteIds.includes(story.id));
+  const keyboard = newsCardKeyboard(
+    index,
+    stories,
+    story.id,
+    state.favoriteIds.includes(story.id),
+    listKind
+  );
   const message = ctx.callbackQuery?.message;
   const hasPhoto = !!message && "photo" in message && !!message.photo?.length;
 
@@ -671,6 +749,36 @@ export function getBot() {
     await renderNewsHome(ctx);
   });
 
+  bot.callbackQuery(/^news:list:(all|unread|favorites|history):(\d+)$/, async (ctx) => {
+    await ctx.answerCallbackQuery();
+    try {
+      const feed = await getNewsFeed();
+      await showNewsList(ctx, feed, ctx.match[1] as NewsListKind, Number(ctx.match[2]));
+    } catch (error) {
+      await reportNewsError(ctx, error);
+    }
+  });
+
+  bot.callbackQuery(/^news:page:(all|unread|favorites|history):(\d+)$/, async (ctx) => {
+    await ctx.answerCallbackQuery();
+    try {
+      const feed = await getNewsFeed();
+      await showNewsList(ctx, feed, ctx.match[1] as NewsListKind, Number(ctx.match[2]));
+    } catch (error) {
+      await reportNewsError(ctx, error);
+    }
+  });
+
+  bot.callbackQuery("news:refresh", async (ctx) => {
+    await ctx.answerCallbackQuery({ text: "خبرها در حال تازه‌سازی هستند…" });
+    try {
+      const feed = await refreshNewsFeed();
+      await showNewsList(ctx, feed, "all");
+    } catch (error) {
+      await reportNewsError(ctx, error);
+    }
+  });
+
   bot.callbackQuery("news:settings", async (ctx) => {
     await ctx.answerCallbackQuery();
     await renderNewsSettings(ctx);
@@ -711,7 +819,7 @@ export function getBot() {
         );
         return;
       }
-      await showNewsCard(ctx, feed, feed.stories, 0);
+      await showNewsList(ctx, feed, "all");
     } catch (error) {
       await reportNewsError(ctx, error);
     }
@@ -745,16 +853,7 @@ export function getBot() {
     await ctx.answerCallbackQuery();
     try {
       const feed = await getNewsFeed();
-      const selected = new Set(await getNewsSelection(ctx.from.id, feed.categories));
-      const state = await getNewsUserState(ctx.from.id);
-      if (!selected.size) {
-        await renderNewsSettings(ctx);
-        return;
-      }
-      const stories = feed.stories.filter(
-        (story) => selected.has(story.categoryId) && !state.readIds.includes(story.id)
-      );
-      await showNewsList(ctx, "🆕 <b>خبرهای جدید و خوانده‌نشده</b>", stories);
+      await showNewsList(ctx, feed, "unread");
     } catch (error) {
       await reportNewsError(ctx, error);
     }
@@ -763,12 +862,8 @@ export function getBot() {
   bot.callbackQuery("news:favorites", async (ctx) => {
     await ctx.answerCallbackQuery();
     try {
-      const [feed, state] = await Promise.all([getNewsFeed(), getNewsUserState(ctx.from.id)]);
-      await showNewsList(
-        ctx,
-        "⭐ <b>خبرهای ذخیره‌شده</b>",
-        feed.stories.filter((story) => state.favoriteIds.includes(story.id))
-      );
+      const feed = await getNewsFeed();
+      await showNewsList(ctx, feed, "favorites");
     } catch (error) {
       await reportNewsError(ctx, error);
     }
@@ -777,12 +872,25 @@ export function getBot() {
   bot.callbackQuery("news:history", async (ctx) => {
     await ctx.answerCallbackQuery();
     try {
-      const [feed, state] = await Promise.all([getNewsFeed(), getNewsUserState(ctx.from.id)]);
-      await showNewsList(
-        ctx,
-        "📚 <b>خبرهای خوانده‌شده</b>",
-        feed.stories.filter((story) => state.readIds.includes(story.id))
-      );
+      const feed = await getNewsFeed();
+      await showNewsList(ctx, feed, "history");
+    } catch (error) {
+      await reportNewsError(ctx, error);
+    }
+  });
+
+  bot.callbackQuery(/^news:open:(all|unread|favorites|history):([a-f0-9]{16})$/, async (ctx) => {
+    await ctx.answerCallbackQuery();
+    try {
+      const feed = await getNewsFeed();
+      const listKind = ctx.match[1] as NewsListKind;
+      const stories = await getNewsListStories(ctx.from.id, feed, listKind);
+      const index = stories.findIndex((story) => story.id === ctx.match[2]);
+      if (index < 0) {
+        await showNewsList(ctx, feed, listKind);
+        return;
+      }
+      await showNewsCard(ctx, feed, stories, index, listKind);
     } catch (error) {
       await reportNewsError(ctx, error);
     }
@@ -792,12 +900,12 @@ export function getBot() {
     await ctx.answerCallbackQuery();
     try {
       const feed = await getNewsFeed();
-      const story = feed.stories.find((item) => item.id === ctx.match[1]);
-      if (!story) {
+      const index = feed.stories.findIndex((item) => item.id === ctx.match[1]);
+      if (index < 0) {
         await renderNewsHome(ctx);
         return;
       }
-      await showNewsCard(ctx, feed, [story], 0);
+      await showNewsCard(ctx, feed, feed.stories, index, "all");
     } catch (error) {
       await reportNewsError(ctx, error);
     }
@@ -862,7 +970,7 @@ export function getBot() {
         await renderNewsHome(ctx);
         return;
       }
-      await showNewsCard(ctx, feed, stories, index);
+      await showNewsCard(ctx, feed, stories, index, "all");
     } catch (error) {
       await reportNewsError(ctx, error);
     }
