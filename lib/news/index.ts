@@ -466,16 +466,15 @@ export function formatNewsItem(
   const descriptionLength = Math.min(550, Math.max(0, maxLength - titleLength - 200));
   const descriptionText = truncateNewsText(story.description, descriptionLength);
   const description = descriptionText
-    ? `\u2067${escapeHtml(descriptionText)}\u2069`
+    ? `<blockquote><b>${escapeHtml(descriptionText)}</b></blockquote>`
     : "";
   const category = `\u2067${escapeHtml(Array.from(story.category).slice(0, 80).join(""))}\u2069`;
   return [
     `<b>${title}</b>`,
-    description ? `\n${description}` : "",
-    "",
-    `🕒 ${published}`,
-    `🏷 ${category}`,
-    `\n${(index + 1).toLocaleString("fa-IR-u-nu-latn")} از ${total.toLocaleString("fa-IR-u-nu-latn")}`,
+    description ? `\n\n${description}` : "",
+    `<b>🕒 ${published}</b>`,
+    `\n🏷 ${category}`,
+    `\n\n${(index + 1).toLocaleString("fa-IR-u-nu-latn")} از ${total.toLocaleString("fa-IR-u-nu-latn")}`,
   ].filter(Boolean).join("\n");
 }
 
