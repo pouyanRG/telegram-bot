@@ -11,14 +11,16 @@ async function housekeeping() {
   const steps = [
     sql`delete from processed_updates where created_at < now() - interval '2 days'`,
     sql`delete from cache
+        where key like 'profile_step:%'
+           or key like 'pedit:%'
+           or key like 'pending_defphoto:%'
+           or key like 'default_photo:%'`,
+    sql`delete from cache
         where (key like 'admin_login:%'
                and (data->>'resetAt')::bigint < (extract(epoch from now()) * 1000)::bigint)
            or (key like 'pending_sticker:%' and updated_at < now() - interval '1 day')
-           or (key like 'profile_step:%' and updated_at < now() - interval '7 days')
            or (key like 'report:%' and updated_at < now() - interval '1 day')
-           or (key like 'pending_defphoto:%' and updated_at < now() - interval '1 day')
-           or (key like 'coin:%' and updated_at < now() - interval '1 day')
-           or (key like 'pedit:%' and updated_at < now() - interval '1 day')`,
+           or (key like 'coin:%' and updated_at < now() - interval '1 day')`,
     sql`delete from quotas where day < to_char(now() - interval '30 days', 'YYYY-MM-DD')`,
     sql`delete from voice_jobs
         where status <> 'processing' and created_at < now() - interval '30 days'`,

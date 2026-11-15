@@ -102,7 +102,5 @@ export function pickVoiceTier(sec: number) {
 }
 
 export const COINS = {
-  profileReward: 10,
-  newBio: 1,
   reportReward: 5,
 } as const;

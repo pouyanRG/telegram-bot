@@ -17,9 +17,7 @@ import {
   type NewsStory,
 } from "./news";
 import { Bot, GrammyError, InlineKeyboard, type Context } from "grammy";
-import { registerReports, clearReport, takePendingDefPhoto } from "./reports";
-import { sendPeerProfile } from "./peerProfile";
-import { registerProfileEdit, clearEdit } from "./profileEdit";
+import { registerReports, clearReport } from "./reports";
 import { SETTINGS, quotaExceededMessage } from "./config";
 import { consumeQuota, refundQuota } from "./quota";
 import { getPrices, formatPrices, findCoin, formatCoin } from "./prices";
@@ -27,8 +25,8 @@ import { dedupeUpdates, userGuard, throttle } from "./middleware";
 import { mainMenu, BTN, idleKb } from "./menu";
 import { handleVoice, voiceGuide } from "./voice";
 import { clearMode, setVoiceMode } from "./mode";
-import { getCoins, grantProfileReward } from "./coins";
-import { COINS_INFO, PROFILE_INFO } from "./texts";
+import { getCoins } from "./coins";
+import { COINS_INFO } from "./texts";
 import {
   addAdmin,
   isAdminUser,
@@ -41,27 +39,6 @@ import {
   setThinkingSticker,
   takePendingSticker,
 } from "./admins";
-import { getUserByPublicId, getUserRow, sendProfile } from "./userProfile";
-import {
-  AGE_TEXT,
-  BACK_TEXT,
-  GENDER_TEXT,
-  PROVINCE_TEXT,
-  ageKb,
-  provinceKb,
-  genderKb,
-  clearStep,
-  getProfile,
-  getStep,
-  isProvince,
-  missingStep,
-  parseAge,
-  saveAge,
-  saveGender,
-  saveProvince,
-  setStep,
-  type Gender,
-} from "./profile";
 
 let _bot: Bot | null = null;
 
@@ -80,8 +57,6 @@ const HELP_USER = [
   "▫️ نام یا نماد هر ارز (مثل <code>btc</code> یا <code>solana</code> یا <code>بیت‌کوین</code>) را بفرست تا رمزارز را ببینی",
   "▫️ برای تبدیل ویس به متن، از منو «🎙 ویس به متن» را بزن و بعد ویس بفرست",
   "▫️ از منوی اصلی «📰 اخبار روز» را بزن، دسته‌های دلخواهت را انتخاب کن و خبرها را بخوان",
-  "",
-  PROFILE_INFO,
   "",
   "<i>ربات در حال توسعه است و بخش‌ها به‌تدریج فعال می‌شوند.</i>",
 ].join("\n");
@@ -222,7 +197,6 @@ const backToSettingsKb = new InlineKeyboard().text("🔙 برگشت", "menu:sett
 function settingsKb(owner: boolean) {
   const kb = new InlineKeyboard().text("🎞 تنظیم استیکر فکرکردن", "admin:sticker").row();
   kb.text("🚨 گزارش‌ها", "admin:reports").row();
-  kb.text("🖼 عکس پیش‌فرض پسر", "admin:defphoto:m").text("🖼 عکس پیش‌فرض دختر", "admin:defphoto:f").row();
   if (owner) kb.text("👥 فهرست ادمین‌ها", "admin:list").row();
   return kb.text("🔙 برگشت", "menu:home");
 }
@@ -261,50 +235,19 @@ async function menuFor(ctx: Context) {
   return mainMenu(!!uid && (await isAdminUser(uid)));
 }
 
-/** هر بار که کاربر در منو جابه‌جا می‌شود: ویس غیرفعال، حالت انتظار استیکر و مرحله‌ی نیمه‌کاره‌ی پروفایل لغو می‌شود */
+/** هر بار که کاربر در منو جابه‌جا می‌شود، حالت‌های موقت پاک می‌شوند */
 async function resetState(ctx: Context) {
   const uid = ctx.from?.id;
   if (!uid) return;
   await Promise.all([
     clearMode(uid),
     takePendingSticker(uid),
-    clearStep(uid),
-    clearEdit(uid),
     clearReport(uid),
-    takePendingDefPhoto(uid),
   ]).catch((e) => console.error("resetState error:", e));
 }
 
 async function clearLegacyReplyKeyboard(ctx: Context) {
   await ctx.reply("✅ منو به‌روز شد.", { reply_markup: { remove_keyboard: true } });
-}
-
-// ---------- تکمیل پروفایل (جنسیت ← سن ← استان) ----------
-
-/** پیام مرحله‌ی مورد نظر را می‌فرستد */
-async function askStep(ctx: Context, step: "gender" | "age" | "province", replyTo?: number) {
-  const uid = ctx.from!.id;
-  if (step === "gender") {
-    await clearStep(uid);
-    await ctx.reply(GENDER_TEXT, {
-      reply_markup: genderKb,
-      ...(replyTo ? { reply_parameters: { message_id: replyTo } } : {}),
-    });
-  } else if (step === "age") {
-    await setStep(uid, "age");
-    await ctx.reply(AGE_TEXT, { ...HTML, reply_markup: ageKb() });
-  } else {
-    await setStep(uid, "province");
-    await ctx.reply(PROVINCE_TEXT, { reply_markup: provinceKb() });
-  }
-}
-
-/** اگر پروفایل کامل است true؛ وگرنه از اولین مرحله‌ی ناقص ادامه می‌دهد و false برمی‌گرداند */
-async function ensureProfile(ctx: Context) {
-  const step = missingStep(await getProfile(ctx.from!.id));
-  if (!step) return true;
-  await askStep(ctx, step, ctx.message?.message_id);
-  return false;
 }
 
 /** برای دکمه‌های مخصوص ادمین */
@@ -506,17 +449,6 @@ export function getBot() {
     await ctx.reply(RULES_TEXT, HTML);
   });
 
-  // دکمه‌های قدیمیِ بخش حذف‌شده (پیام‌های قدیمی که هنوز در چت کاربران هستند)
-  bot.callbackQuery(
-    /^(?:menu:anon|anon:.+|dm:.+|pp:(?:dm|chat|notify):\d+|rep:chat:\d+)$/,
-    async (ctx) => {
-      await ctx.answerCallbackQuery({ text: "این بخش دیگر وجود ندارد." }).catch(() => {});
-      if (/^(?:menu:anon|anon:|dm:)/.test(ctx.callbackQuery.data)) {
-        await ctx.deleteMessage().catch(() => {});
-      }
-    }
-  );
-
   // ================= کیبورد ثابت پایین =================
 
   bot.hears(BTN.menu, showHome);
@@ -524,20 +456,6 @@ export function getBot() {
     await resetState(ctx);
     await clearLegacyReplyKeyboard(ctx);
     await ctx.reply(HELP_USER, { ...HTML, reply_markup: homeKb });
-  });
-
-  // 👤 پروفایل
-  bot.hears(BTN.profile, async (ctx) => {
-    await resetState(ctx);
-    const uid = ctx.from!.id;
-    const me = await getUserRow(uid);
-    if (!me) return;
-    if (missingStep(me)) {
-      await ctx.reply("⚠️ اول باید پروفایلت را کامل کنی.");
-      await ensureProfile(ctx);
-      return;
-    }
-    await sendProfile(ctx, me, uid);
   });
 
   // 💰 سکه
@@ -550,73 +468,13 @@ export function getBot() {
     });
   });
 
-  // دیدن پروفایل با /user_xxxxxxxx
-  bot.hears(/^\/user_([A-Za-z0-9]{8})$/, async (ctx) => {
-    const target = await getUserByPublicId(ctx.match[1]);
-    if (!target) return void (await ctx.reply("کاربری با این آیدی پیدا نشد."));
-    const viewer = ctx.from!.id;
-    await sendPeerProfile(ctx, target, viewer, await isAdminUser(viewer));
-  });
-
   // دکمه‌ی کیبورد پایین که هنوز بخشی پشتش نیست
   bot.hears(BTN.feedback, async (ctx) => {
     await resetState(ctx);
     await ctx.reply("این بخش به‌زودی فعال می‌شود 🚧");
   });
 
-  // دکمه‌های اینلاین پروفایل که هنوز بخشی پشتشان نیست
-  bot.callbackQuery(/^pf:(?!edit$)/, async (ctx) => {
-    await ctx.answerCallbackQuery({ text: "این بخش به‌زودی فعال می‌شود 🚧" });
-  });
-
-  registerProfileEdit(bot);
   registerReports(bot);
-
-  // ================= تکمیل پروفایل =================
-
-  // مرحله‌ی ۱: جنسیت (دکمه‌ی اینلاین)
-  bot.callbackQuery(/^profile:gender:(m|f)$/, async (ctx) => {
-    await ctx.answerCallbackQuery();
-    await saveGender(ctx.from.id, ctx.match[1] as Gender);
-    await ctx.deleteMessage().catch(() => {});
-    await askStep(ctx, "age");
-  });
-
-  // مرحله‌ی ۲ و ۳: سن و استان (متن یا دکمه‌ی کیبورد پایین)
-  bot.on("message:text", async (ctx, next) => {
-    const text = ctx.message.text.trim();
-    if (text.startsWith("/")) return next();
-
-    const step = await getStep(ctx.from.id);
-    if (!step) return next();
-    const uid = ctx.from.id;
-
-    if (step === "age") {
-      const age = parseAge(text);
-      if (age === null) {
-        return void (await ctx.reply("⚠️ سن باید یک عدد بین ۹ تا ۹۹ باشد. (برای خروج /menu)"));
-      }
-      await saveAge(uid, age);
-      return void (await askStep(ctx, "province"));
-    }
-
-    // step === "province"
-    if (text === BACK_TEXT) return void (await askStep(ctx, "age"));
-    if (!isProvince(text)) {
-      return void (await ctx.reply("لطفا استان را از لیست پایین انتخاب کن 👇"));
-    }
-    await saveProvince(uid, text);
-    await clearStep(uid);
-
-    // هدیه‌ی تکمیل پروفایل (فقط یک بار)
-    const reward = await grantProfileReward(uid).catch((e) => {
-      console.error("profile reward error:", e);
-      return null;
-    });
-    await ctx.reply("✅ پروفایلت کامل شد!" + (reward ? `\n🎁 ${reward} سکه هدیه گرفتی.` : ""), {
-      reply_markup: idleKb,
-    });
-  });
 
   // ================= بخش ادمین =================
 

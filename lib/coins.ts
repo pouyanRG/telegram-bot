@@ -1,12 +1,10 @@
-import { and, desc, eq, gte, isNotNull, sql } from "drizzle-orm";
+import { and, desc, eq, gte, sql } from "drizzle-orm";
 import { getDb } from "./db";
 import { coinTransactions, users } from "./schema";
-import { COINS } from "./config";
 
 /** دلیل هر تراکنش سکه؛ در دفتر ذخیره می‌شود */
 export type CoinReason =
   | "opening_balance"
-  | "profile_reward"
   | "report_reward"
   | "purchase"
   | "daily_bonus"
@@ -97,40 +95,6 @@ export const addCoinsTx = (tx: Tx, userId: number, amount: number, reason: CoinR
 
 export const spendCoinsTx = (tx: Tx, userId: number, amount: number, reason: CoinReason, ref?: string) =>
   applyDelta(tx, userId, -amount, reason, ref);
-
-// ---------- هدیه‌ی تکمیل پروفایل ----------
-
-/** فقط یک بار و فقط اگر پروفایل واقعاً کامل باشد */
-export async function grantProfileReward(userId: number) {
-  return getDb().transaction(async (tx) => {
-    const [r] = await tx
-      .update(users)
-      .set({
-        coins: sql`${users.coins} + ${COINS.profileReward}`,
-        profileRewarded: true,
-      })
-      .where(
-        and(
-          eq(users.telegramId, userId),
-          eq(users.profileRewarded, false),
-          isNotNull(users.gender),
-          isNotNull(users.age),
-          isNotNull(users.province)
-        )
-      )
-      .returning({ coins: users.coins });
-    if (!r) return null;
-
-    await tx.insert(coinTransactions).values({
-      userId,
-      amount: COINS.profileReward,
-      reason: "profile_reward",
-      ref: "profile",
-      balanceAfter: r.coins,
-    });
-    return COINS.profileReward;
-  });
-}
 
 // ---------- برای پشتیبانی ----------
 

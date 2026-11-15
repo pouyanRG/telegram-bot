@@ -20,14 +20,12 @@ export function mainMenu(isAdmin = false) {
 // خالی = ایموجی معمولی کنار متن دکمه
 const ICON_IDS: Record<string, string> = {
   help: "",
-  profile: "",
   coins: "",
   feedback: "",
 };
 
 const DEFS = {
   help: { emoji: "❓", text: "راهنما" },
-  profile: { emoji: "👤", text: "پروفایل" },
   coins: { emoji: "💰", text: "سکه" },
   feedback: { emoji: "📮", text: "انتقادات و پیشنهادات" },
 } as const;
@@ -40,7 +38,6 @@ const label = (k: Key) => (ICON_IDS[k] ? DEFS[k].text : `${DEFS[k].emoji} ${DEFS
 
 export const BTN = {
   help: label("help"),
-  profile: label("profile"),
   coins: label("coins"),
   feedback: label("feedback"),
   menu: "📋 منو",
@@ -58,7 +55,7 @@ const b = (k: Key): Btn => ({
 
 // ترتیب هر ردیف از چپ به راست است (چیدمان تلگرام)
 export const idleKb = {
-  keyboard: [[b("coins"), b("profile"), b("help")], [b("feedback")]],
+  keyboard: [[b("coins"), b("help")], [b("feedback")]],
   resize_keyboard: true,
   is_persistent: true,
 };

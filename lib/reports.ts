@@ -5,11 +5,7 @@ import { bans, cache, reports, users } from "./schema";
 import { COINS } from "./config";
 import { addCoins } from "./coins";
 import { isAdminUser, ownerId } from "./admins";
-import { ensurePublicId, getUserRow } from "./userProfile";
 import { idleKb } from "./menu";
-import { likeProfile } from "./likes";
-import { peerKb } from "./peerProfile";
-import { setDefaultPhoto, getDefaultPhoto, setPendingDefPhoto, takePendingDefPhoto, type G } from "./defaultPhoto";
 
 const HTML = { parse_mode: "HTML" as const };
 const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
@@ -20,8 +16,6 @@ const REASONS = [
   { btn: "تبلیغات سایت ها و ربات ها و کانال ها", why: "تبلیغات سایت‌ها و ربات‌ها و کانال‌ها" },
   { btn: "ایجاد مزاحمت", why: "ایجاد مزاحمت" },
   { btn: "پخش شماره موبایل یا اطلاعات شخصی دیگران", why: "پخش شماره موبایل یا اطلاعات شخصی دیگران" },
-  { btn: "کلمات یا عکس غیر اخلاقی و یا توهین آمیز در پروفایل", why: "کلمات یا عکس غیر اخلاقی و یا توهین آمیز در پروفایل" },
-  { btn: "جنسیت اشتباه در پروفایل", why: "جنسیت اشتباه در پروفایل" },
   { btn: "دیگر موارد...", why: "دیگر موارد" },
 ];
 
@@ -46,13 +40,14 @@ async function getReport(id: number) {
 export async function clearReport(id: number) {
   await getDb().delete(cache).where(eq(cache.key, rkey(id)));
 }
-export { takePendingDefPhoto };
-
 // ---------- کمکی‌ها ----------
 
-async function publicIdOf(userId: number) {
-  const u = await getUserRow(userId);
-  return u ? ensurePublicId(userId, u.publicId) : String(userId);
+async function userExists(userId: number) {
+  const [user] = await getDb()
+    .select({ id: users.telegramId })
+    .from(users)
+    .where(eq(users.telegramId, userId));
+  return !!user;
 }
 
 async function adminOnly(ctx: Context) {
@@ -107,30 +102,6 @@ async function createReport(p: { reporterId: number; targetId: number; reason: s
 // ---------- ثبت هندلرها ----------
 
 export function registerReports(bot: Bot) {
-  // ===== پروفایل مخاطب: لایک =====
-  bot.callbackQuery(/^pp:like:(\d+)$/, async (ctx) => {
-    const target = Number(ctx.match[1]);
-    const r = await likeProfile(ctx.from.id, target);
-    if (r.status === "self") {
-      return void (await ctx.answerCallbackQuery({ text: "پروفایل خودت را نمی‌توانی لایک کنی 😅" }));
-    }
-    if (r.status === "missing") return void (await ctx.answerCallbackQuery({ text: "کاربر پیدا نشد" }));
-    if (r.status === "already") {
-      return void (await ctx.answerCallbackQuery({ text: "❤️ قبلاً این کاربر را لایک کرده‌ای" }));
-    }
-    const t = await getUserRow(target);
-    const adm = await isAdminUser(ctx.from.id);
-    await ctx.answerCallbackQuery({ text: "❤️ لایک شد" });
-    await ctx
-      .editMessageReplyMarkup({ reply_markup: peerKb(target, r.likes, adm && !!t?.photoFileId) })
-      .catch(() => {});
-  });
-
-  // دکمه‌های بدون عملکرد هنوز
-  bot.callbackQuery(/^pp:(gift|block|add):\d+$/, async (ctx) => {
-    await ctx.answerCallbackQuery({ text: "این بخش به‌زودی فعال می‌شود 🚧" });
-  });
-
   // ===== گزارش کاربر =====
   bot.callbackQuery(/^rp:(\d+)$/, async (ctx) => {
     await ctx.answerCallbackQuery();
@@ -138,10 +109,7 @@ export function registerReports(bot: Bot) {
     const target = Number(ctx.match[1]);
 
     if (target === me) return void (await ctx.reply("خودت را نمی‌توانی گزارش کنی 😅"));
-    const t = await getUserRow(target);
-    if (!t) return void (await ctx.reply("کاربر پیدا نشد."));
-
-    const pid = await publicIdOf(target);
+    if (!(await userExists(target))) return void (await ctx.reply("کاربر پیدا نشد."));
     const kb = new InlineKeyboard();
     REASONS.forEach((r, i) => kb.text(r.btn, `rr:${i}:${target}`).row());
 
@@ -149,7 +117,7 @@ export function registerReports(bot: Bot) {
       [
         "⚠️ فرم ارسال گزارش عدم رعایت قوانین",
         "",
-        `چرا میخوای /user_${pid} رو گزارش کنی؟`,
+        `چرا می‌خواهی کاربر <code>${target}</code> را گزارش کنی؟`,
         "",
         `- توجه : ${WARN}`,
         "",
@@ -174,7 +142,7 @@ export function registerReports(bot: Bot) {
         `⚠️ فرم ارسال گزارش عدم رعایت قوانین به دلیل ${reason.why}`,
         "",
         "<code>خب حالا کافیه یه توضیح دقیق و 《کامل》 درباره گزارشت بفرستی تا ثبتش کنم.</code>",
-        "<code>- مثلا : داره تبلیغات فلان کانال رو توی پروفایلش میکنه.</code>",
+        "<code>- مثلا: تبلیغ یک کانال یا ایجاد مزاحمت.</code>",
         "",
         `برای لغو گزارش 《 ${REPORT_BACK} 》 را انتخاب کنید 👇`,
       ].join("\n"),
@@ -228,13 +196,12 @@ export function registerReports(bot: Bot) {
     const back = new InlineKeyboard().text("🔙 برگشت", "menu:settings");
     if (!r) return void (await edit(ctx, "✅ گزارش در انتظار بررسی وجود ندارد.", back));
 
-    const [rp, tp] = await Promise.all([publicIdOf(r.reporterId), publicIdOf(r.targetId)]);
     const when = r.createdAt.toLocaleString("fa-IR", { timeZone: "Asia/Tehran" });
     const text = [
       `🚨 <b>گزارش #${r.id}</b> (${c.n} گزارش در انتظار)`,
       "",
-      `👤 گزارش‌دهنده: /user_${rp} (<code>${r.reporterId}</code>)`,
-      `🎯 گزارش‌شده: /user_${tp} (<code>${r.targetId}</code>)`,
+      `👤 گزارش‌دهنده: <code>${r.reporterId}</code>`,
+      `🎯 گزارش‌شده: <code>${r.targetId}</code>`,
       `📌 دلیل: ${esc(r.reason)}`,
       `🕒 ${when}`,
       "",
@@ -294,40 +261,4 @@ export function registerReports(bot: Bot) {
     await showReport(ctx);
   });
 
-  // ===== ادمین: عکس پیش‌فرض =====
-
-  bot.callbackQuery(/^admin:defphoto:(m|f)$/, async (ctx) => {
-    if (!(await adminOnly(ctx))) return;
-    await ctx.answerCallbackQuery();
-    const g = ctx.match[1] as G;
-    await setPendingDefPhoto(ctx.from.id, g);
-
-    const cur = await getDefaultPhoto(g).catch(() => null);
-    const name = g === "m" ? "پسرونه" : "دخترونه";
-    if (cur) {
-      await ctx.reply(`عکس فعلی پیش‌فرض ${name}:`);
-      await ctx.replyWithPhoto(cur).catch(() => {});
-    }
-    await ctx.reply(`🖼 عکس پیش‌فرض ${name} را به‌صورت عکس (Photo) بفرست.`, {
-      reply_markup: new InlineKeyboard().text("❌ انصراف", "admin:defphoto_cancel"),
-    });
-  });
-
-  bot.callbackQuery("admin:defphoto_cancel", async (ctx) => {
-    if (!(await adminOnly(ctx))) return;
-    await takePendingDefPhoto(ctx.from.id);
-    await ctx.answerCallbackQuery({ text: "لغو شد" });
-    await ctx.deleteMessage().catch(() => {});
-  });
-
-  bot.on("message:photo", async (ctx, next) => {
-    const uid = ctx.from.id;
-    if (!(await isAdminUser(uid))) return next();
-    const g = await takePendingDefPhoto(uid);
-    if (!g) return next();
-    await setDefaultPhoto(g, ctx.message.photo.at(-1)!.file_id);
-    await ctx.reply(`✅ عکس پیش‌فرض ${g === "m" ? "پسرونه" : "دخترونه"} ذخیره شد.`, {
-      reply_markup: new InlineKeyboard().text("🔙 برگشت", "menu:settings"),
-    });
-  });
 }

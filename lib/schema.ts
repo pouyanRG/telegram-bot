@@ -21,23 +21,11 @@ export const users = pgTable("users", {
   username: text("username"),
   firstName: text("first_name"),
   language: text("language"),
-  gender: text("gender"),
-  age: integer("age"),
-  province: text("province"),
   proUntil: ts("pro_until"),
   isBanned: boolean("is_banned").default(false).notNull(),
   createdAt: ts("created_at").defaultNow().notNull(),
   lastSeenAt: ts("last_seen_at").defaultNow().notNull(),
   coins: integer("coins").default(0).notNull(),
-  profileRewarded: boolean("profile_rewarded").default(false).notNull(),
-  displayName: text("display_name"),
-  city: text("city"),
-  photoFileId: text("photo_file_id"),
-  publicId: text("public_id").unique(), // برای /user_xxxxxxxx
-  followersCount: integer("followers_count").default(0).notNull(),
-  followingCount: integer("following_count").default(0).notNull(),
-  likesCount: integer("likes_count").default(0).notNull(),
-  bio: text("bio"),
 });
 
 
@@ -139,21 +127,6 @@ export const coinTransactions = pgTable(
     uniqRef: uniqueIndex("coin_tx_user_reason_ref_uq").on(t.userId, t.reason, t.ref),
     byUser: index("coin_tx_user_idx").on(t.userId, t.id),
   })
-);
-
-// هر کاربر فقط یک بار می‌تواند یک پروفایل را لایک کند
-export const profileLikes = pgTable(
-  "profile_likes",
-  {
-    likerId: bigint("liker_id", { mode: "number" })
-      .notNull()
-      .references(() => users.telegramId, { onDelete: "cascade" }),
-    targetId: bigint("target_id", { mode: "number" })
-      .notNull()
-      .references(() => users.telegramId, { onDelete: "cascade" }),
-    createdAt: ts("created_at").defaultNow().notNull(),
-  },
-  (t) => ({ pk: primaryKey({ columns: [t.likerId, t.targetId] }) })
 );
 
 // گزارش تخلف؛ status: pending | confirmed | rejected
