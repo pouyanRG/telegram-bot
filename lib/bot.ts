@@ -157,7 +157,7 @@ function newsCategoriesKb(categories: NewsCategory[], selected: string[]) {
   for (const category of categories) {
     const mark = active.has(category.id) ? "✅" : "▫️";
     const label = Array.from(category.label).slice(0, 28).join("");
-    kb.text(`${mark} ${label} (${category.count.toLocaleString("fa-IR")})`, `news:toggle:${category.id}`).row();
+    kb.text(`${mark} ${label} (${category.count.toLocaleString("fa-IR-u-nu-latn")})`, `news:toggle:${category.id}`).row();
   }
   return kb
     .text("💾 ثبت تغییرات", "news:categories:save")
@@ -186,7 +186,7 @@ function newsCategoriesText(selectedCount: number, total: number) {
   return [
     "🏷 <b>دسته‌بندی خبرها</b>",
     "دسته‌های موردنظرت را انتخاب کن و در پایان «ثبت تغییرات» را بزن.",
-    `انتخاب‌شده: ${selectedCount.toLocaleString("fa-IR")} از ${total.toLocaleString("fa-IR")}`,
+    `انتخاب‌شده: ${selectedCount.toLocaleString("fa-IR-u-nu-latn")} از ${total.toLocaleString("fa-IR-u-nu-latn")}`,
   ].join("\n");
 }
 
@@ -207,8 +207,8 @@ function newsCardKeyboard(
     .row()
     .url("🔗 متن کامل خبر", stories[index].url)
     .row()
-    .text("⭐ ذخیره‌ها", "news:list:favorites:0")
     .text("⬅️ فهرست خبرها", `news:list:${listKind}:${Math.floor(index / NEWS_PAGE_SIZE)}`)
+    .text("⭐ ذخیره‌ها", "news:list:favorites:0")
     .row()
     .text("🏠 منو", "menu:home");
   return kb;
@@ -377,11 +377,11 @@ async function showNewsList(ctx: Context, feed: NewsFeed, kind: NewsListKind, pa
   const visibleStories = stories.slice(start, start + NEWS_PAGE_SIZE);
   const keyboard = new InlineKeyboard();
   const headlines = visibleStories.map((story, index) => {
-    const number = (start + index + 1).toLocaleString("fa-IR");
+    const number = (start + index + 1).toLocaleString("fa-IR-u-nu-latn");
     return `<blockquote>\u200f${number}. ${formatNewsTitle(story.title, 110)}</blockquote>`;
   });
   visibleStories.forEach((story, index) => {
-    const number = (start + index + 1).toLocaleString("fa-IR");
+    const number = (start + index + 1).toLocaleString("fa-IR-u-nu-latn");
     keyboard
       .text(`📰 خبر ${number}`, `news:open:${kind}:${story.id}`);
     if (index % 2 === 1 || index === visibleStories.length - 1) keyboard.row();
@@ -392,10 +392,10 @@ async function showNewsList(ctx: Context, feed: NewsFeed, kind: NewsListKind, pa
   }
   if (currentPage > 0 || currentPage + 1 < pageCount) keyboard.row();
   keyboard
-    .text("⚙️ تنظیمات خبرها", "news:settings")
-    .text("⬅️ بازگشت", "menu:news");
+    .text("⬅️ بازگشت", "menu:news")
+    .text("⚙️ تنظیمات خبرها", "news:settings");
 
-  const position = `صفحهٔ ${(currentPage + 1).toLocaleString("fa-IR")} از ${pageCount.toLocaleString("fa-IR")} · ${stories.length.toLocaleString("fa-IR")} خبر`;
+  const position = `صفحهٔ ${(currentPage + 1).toLocaleString("fa-IR-u-nu-latn")} از ${pageCount.toLocaleString("fa-IR-u-nu-latn")} · ${stories.length.toLocaleString("fa-IR-u-nu-latn")} خبر`;
   const staleNotice = feed.stale ? "\n\n⚠️ فید تازه نشد؛ خبرهای ذخیره‌شده را می‌بینی." : "";
   const listText = [
     newsListTitle(kind),

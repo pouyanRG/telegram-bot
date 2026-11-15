@@ -98,16 +98,18 @@ function decodeHtmlEntities(value: string) {
   );
 }
 
-function plainText(value: unknown, maxLength: number) {
+function plainText(value: unknown, maxLength: number, preserveParagraphs = false) {
   const clean = decodeHtmlEntities(text(value))
     .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, " ")
     .replace(/[\u202a-\u202e\u2066-\u2069]/g, "")
     .replace(/<script\b[^>]*>[\s\S]*?<\/script\s*>/gi, " ")
     .replace(/<style\b[^>]*>[\s\S]*?<\/style\s*>/gi, " ")
-    .replace(/<br\s*\/?>|<\/(?:p|div|li|h[1-6])\s*>/gi, " ")
+    .replace(/<br\s*\/?>|<\/(?:p|div|li|h[1-6])\s*>/gi, preserveParagraphs ? "\n" : " ")
     .replace(/<[^>]*>/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
+    .split(/\r?\n/)
+    .map((line) => line.replace(/\s+/g, " ").trim())
+    .filter(Boolean)
+    .join(preserveParagraphs ? "\n\n" : " ");
   return Array.from(clean).slice(0, maxLength).join("");
 }
 
@@ -167,7 +169,7 @@ export function parseRssFeed(xml: string): CachedFeed {
     stories.push({
       id: createHash("sha256").update(identity).digest("hex").slice(0, 16),
       title,
-      description: plainText(item.description, 700),
+      description: plainText(item.description, 700, true),
       url,
       imageUrl: enclosureUrl(item.enclosure),
       publishedAt: Number.isFinite(date) ? new Date(date).toISOString() : null,
@@ -429,7 +431,21 @@ export function formatNewsTitle(title: string, maxLength = 350) {
     }
     visibleTitle = `${characters.slice(0, boundary).join("").trimEnd()}…`;
   }
-  return `\u2068${escapeHtml(visibleTitle)}\u2069`;
+  return `\u2067${escapeHtml(visibleTitle)}\u2069`;
+}
+
+function truncateNewsText(value: string, maxLength: number) {
+  const characters = Array.from(value.trim());
+  if (characters.length <= maxLength) return value;
+  const contentLength = Math.max(0, maxLength - 1);
+  let boundary = contentLength;
+  for (let index = contentLength - 1; index >= Math.floor(contentLength * 0.7); index -= 1) {
+    if (/[\s\u200c،؛:!?؟-]/u.test(characters[index])) {
+      boundary = index;
+      break;
+    }
+  }
+  return `${characters.slice(0, boundary).join("").trimEnd()}…`;
 }
 
 export function formatNewsItem(
@@ -439,7 +455,7 @@ export function formatNewsItem(
   maxLength = 4096
 ) {
   const published = story.publishedAt
-    ? new Date(story.publishedAt).toLocaleString("fa-IR", {
+    ? new Date(story.publishedAt).toLocaleString("fa-IR-u-nu-latn", {
         timeZone: "Asia/Tehran",
         dateStyle: "short",
         timeStyle: "short",
@@ -448,16 +464,18 @@ export function formatNewsItem(
   const title = formatNewsTitle(story.title);
   const titleLength = Math.min(Array.from(story.title).length, 350);
   const descriptionLength = Math.min(550, Math.max(0, maxLength - titleLength - 200));
-  const descriptionText = Array.from(story.description).slice(0, descriptionLength).join("");
-  const description = descriptionText ? `\u2068${escapeHtml(descriptionText)}\u2069` : "";
-  const category = `\u2068${escapeHtml(Array.from(story.category).slice(0, 80).join(""))}\u2069`;
+  const descriptionText = truncateNewsText(story.description, descriptionLength);
+  const description = descriptionText
+    ? `\u2067${escapeHtml(descriptionText)}\u2069`
+    : "";
+  const category = `\u2067${escapeHtml(Array.from(story.category).slice(0, 80).join(""))}\u2069`;
   return [
-    `📰 <b>${title}</b>`,
+    `<b>${title}</b>`,
     description ? `\n${description}` : "",
     "",
     `🕒 ${published}`,
     `🏷 ${category}`,
-    `\n${(index + 1).toLocaleString("fa-IR")} از ${total.toLocaleString("fa-IR")}`,
+    `\n${(index + 1).toLocaleString("fa-IR-u-nu-latn")} از ${total.toLocaleString("fa-IR-u-nu-latn")}`,
   ].filter(Boolean).join("\n");
 }
 
