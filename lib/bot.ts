@@ -366,7 +366,7 @@ async function showNewsList(ctx: Context, feed: NewsFeed, kind: NewsListKind, pa
           kind === "unread" ? "news:categories" : "news:settings"
         )
         .row()
-        .text("⬅️ اخبار روز", "menu:news")
+        .text("⬅️ بازگشت", "menu:news")
     );
     return;
   }
@@ -393,7 +393,7 @@ async function showNewsList(ctx: Context, feed: NewsFeed, kind: NewsListKind, pa
   if (currentPage > 0 || currentPage + 1 < pageCount) keyboard.row();
   keyboard
     .text("⚙️ تنظیمات خبرها", "news:settings")
-    .text("⬅️ اخبار روز", "menu:news");
+    .text("⬅️ بازگشت", "menu:news");
 
   const position = `صفحهٔ ${(currentPage + 1).toLocaleString("fa-IR")} از ${pageCount.toLocaleString("fa-IR")} · ${stories.length.toLocaleString("fa-IR")} خبر`;
   const staleNotice = feed.stale ? "\n\n⚠️ فید تازه نشد؛ خبرهای ذخیره‌شده را می‌بینی." : "";
