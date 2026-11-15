@@ -2,6 +2,7 @@ import { UserError } from "./errors";
 import {
   beginNewsCategoryDraft,
   formatNewsItem,
+  formatNewsTitle,
   getNewsAlertsEnabled,
   getNewsCategoryDraft,
   getNewsFeed,
@@ -375,12 +376,15 @@ async function showNewsList(ctx: Context, feed: NewsFeed, kind: NewsListKind, pa
   const start = currentPage * NEWS_PAGE_SIZE;
   const visibleStories = stories.slice(start, start + NEWS_PAGE_SIZE);
   const keyboard = new InlineKeyboard();
-  visibleStories.forEach((story) => {
-    const characters = Array.from(story.title);
-    const title = characters.slice(0, 48).join("");
+  const headlines = visibleStories.map((story, index) => {
+    const number = (start + index + 1).toLocaleString("fa-IR");
+    return `${number}. ${formatNewsTitle(story.title, 110)}`;
+  });
+  visibleStories.forEach((story, index) => {
+    const number = (start + index + 1).toLocaleString("fa-IR");
     keyboard
-      .text(`📰 ${title}${characters.length > 48 ? "…" : ""}`, `news:open:${kind}:${story.id}`)
-      .row();
+      .text(`📰 خبر ${number}`, `news:open:${kind}:${story.id}`);
+    if (index % 2 === 1 || index === visibleStories.length - 1) keyboard.row();
   });
   if (currentPage > 0) keyboard.text("⬅️ قبلی", `news:page:${kind}:${currentPage - 1}`);
   if (currentPage + 1 < pageCount) {
@@ -393,7 +397,16 @@ async function showNewsList(ctx: Context, feed: NewsFeed, kind: NewsListKind, pa
 
   const position = `صفحهٔ ${(currentPage + 1).toLocaleString("fa-IR")} از ${pageCount.toLocaleString("fa-IR")} · ${stories.length.toLocaleString("fa-IR")} خبر`;
   const staleNotice = feed.stale ? "\n\n⚠️ فید تازه نشد؛ خبرهای ذخیره‌شده را می‌بینی." : "";
-  await editOrReply(ctx, `${newsListTitle(kind)}\n${position}${staleNotice}`, keyboard);
+  const listText = [
+    newsListTitle(kind),
+    position,
+    "",
+    ...headlines,
+    "",
+    "برای خواندن متن کامل، شمارهٔ همان خبر را بزن.",
+    staleNotice,
+  ].filter(Boolean).join("\n");
+  await editOrReply(ctx, listText, keyboard);
 }
 
 async function reportNewsError(ctx: Context, error: unknown) {
@@ -410,14 +423,17 @@ async function showNewsCard(
   feed: NewsFeed,
   stories: NewsStory[],
   index: number,
-  listKind: NewsListKind
+  listKind: NewsListKind,
+  sendAsNewMessage = false
 ) {
   const story = stories[index];
   if (!story) return;
-  const body = formatNewsItem(story, index, stories.length);
-  const caption = feed.stale
-    ? `${body}\n\n⚠️ فید موقتاً به‌روز نشد؛ این خبر از نسخهٔ ذخیره‌شده است.`
-    : body;
+  const staleNotice = feed.stale
+    ? "\n\n⚠️ فید موقتاً به‌روز نشد؛ این خبر از نسخهٔ ذخیره‌شده است."
+    : "";
+  const captionLimit = story.imageUrl ? 1024 - (staleNotice ? 100 : 0) : 4096;
+  const body = formatNewsItem(story, index, stories.length, captionLimit);
+  const caption = `${body}${staleNotice}`;
   const userId = ctx.from!.id;
   const state = await getNewsUserState(userId);
   const keyboard = newsCardKeyboard(
@@ -430,7 +446,7 @@ async function showNewsCard(
   const message = ctx.callbackQuery?.message;
   const hasPhoto = !!message && "photo" in message && !!message.photo?.length;
 
-  if (!message) {
+  if (sendAsNewMessage || !message) {
     await sendNewsCard(ctx, story, caption, keyboard);
   } else if (hasPhoto && story.imageUrl) {
     try {
@@ -890,7 +906,7 @@ export function getBot() {
         await showNewsList(ctx, feed, listKind);
         return;
       }
-      await showNewsCard(ctx, feed, stories, index, listKind);
+      await showNewsCard(ctx, feed, stories, index, listKind, true);
     } catch (error) {
       await reportNewsError(ctx, error);
     }

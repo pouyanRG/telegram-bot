@@ -55,7 +55,7 @@ export async function GET(request: Request) {
         if (!subscriber.selected.includes(story.categoryId)) continue;
         const state = await getNewsUserState(subscriber.userId);
         if (state.deliveredIds.includes(story.id)) continue;
-        const text = formatNewsItem(story, 0, 1);
+        const text = formatNewsItem(story, 0, 1, story.imageUrl ? 1024 : 4096);
         const options = {
           parse_mode: "HTML" as const,
           disable_notification: true,

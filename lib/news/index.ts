@@ -101,6 +101,7 @@ function decodeHtmlEntities(value: string) {
 function plainText(value: unknown, maxLength: number) {
   const clean = decodeHtmlEntities(text(value))
     .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, " ")
+    .replace(/[\u202a-\u202e\u2066-\u2069]/g, "")
     .replace(/<script\b[^>]*>[\s\S]*?<\/script\s*>/gi, " ")
     .replace(/<style\b[^>]*>[\s\S]*?<\/style\s*>/gi, " ")
     .replace(/<br\s*\/?>|<\/(?:p|div|li|h[1-6])\s*>/gi, " ")
@@ -151,7 +152,7 @@ export function parseRssFeed(xml: string): CachedFeed {
   for (const raw of asArray(channel.item)) {
     if (!raw || typeof raw !== "object") continue;
     const item = raw as XmlRecord;
-    const title = plainText(item.title, 220);
+    const title = plainText(item.title, 350);
     const url = safeUrl(text(item.link));
     if (!title || !url) continue;
 
@@ -415,7 +416,28 @@ export async function toggleNewsCategoryDraft(
   return [...next];
 }
 
-export function formatNewsItem(story: NewsStory, index: number, total: number) {
+export function formatNewsTitle(title: string, maxLength = 350) {
+  const characters = Array.from(title.trim());
+  let visibleTitle = characters.slice(0, maxLength).join("");
+  if (characters.length > maxLength) {
+    let boundary = maxLength;
+    for (let index = maxLength - 1; index >= Math.floor(maxLength * 0.55); index -= 1) {
+      if (/[\s\u200c،؛:!?؟-]/u.test(characters[index])) {
+        boundary = index;
+        break;
+      }
+    }
+    visibleTitle = `${characters.slice(0, boundary).join("").trimEnd()}…`;
+  }
+  return `\u2068${escapeHtml(visibleTitle)}\u2069`;
+}
+
+export function formatNewsItem(
+  story: NewsStory,
+  index: number,
+  total: number,
+  maxLength = 4096
+) {
   const published = story.publishedAt
     ? new Date(story.publishedAt).toLocaleString("fa-IR", {
         timeZone: "Asia/Tehran",
@@ -423,15 +445,19 @@ export function formatNewsItem(story: NewsStory, index: number, total: number) {
         timeStyle: "short",
       })
     : "زمان نامشخص";
-  const title = escapeHtml(Array.from(story.title).slice(0, 180).join(""));
-  const description = escapeHtml(Array.from(story.description).slice(0, 550).join(""));
+  const title = formatNewsTitle(story.title);
+  const titleLength = Math.min(Array.from(story.title).length, 350);
+  const descriptionLength = Math.min(550, Math.max(0, maxLength - titleLength - 200));
+  const descriptionText = Array.from(story.description).slice(0, descriptionLength).join("");
+  const description = descriptionText ? `\u2068${escapeHtml(descriptionText)}\u2069` : "";
+  const category = `\u2068${escapeHtml(Array.from(story.category).slice(0, 80).join(""))}\u2069`;
   return [
     `📰 <b>${title}</b>`,
     description ? `\n${description}` : "",
     "",
     `🕒 ${published}`,
-    `🏷 ${escapeHtml(Array.from(story.category).slice(0, 80).join(""))}`,
-    `\n${index + 1} از ${total}`,
+    `🏷 ${category}`,
+    `\n${(index + 1).toLocaleString("fa-IR")} از ${total.toLocaleString("fa-IR")}`,
   ].filter(Boolean).join("\n");
 }
 
