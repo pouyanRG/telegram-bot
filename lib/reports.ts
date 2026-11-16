@@ -1,10 +1,10 @@
-import { and, count, eq } from "drizzle-orm";
+import { and, count, eq, isNull } from "drizzle-orm";
 import { InlineKeyboard, Keyboard, type Bot, type Context } from "grammy";
 import { getDb } from "./db";
 import { bans, cache, reports, users } from "./schema";
 import { COINS } from "./config";
 import { addCoins } from "./coins";
-import { isAdminUser, ownerId } from "./admins";
+import { hasAdminPermission, ownerId, recordAdminAction } from "./admins";
 import { idleKb } from "./menu";
 
 const HTML = { parse_mode: "HTML" as const };
@@ -51,8 +51,8 @@ async function userExists(userId: number) {
 }
 
 async function adminOnly(ctx: Context) {
-  if (ctx.from && (await isAdminUser(ctx.from.id))) return true;
-  await ctx.answerCallbackQuery({ text: "⛔️ فقط ادمین", show_alert: true }).catch(() => {});
+  if (ctx.from && (await hasAdminPermission(ctx.from.id, "reports_manage"))) return true;
+  await ctx.answerCallbackQuery({ text: "⛔️ دسترسی بررسی گزارش‌ها را ندارید.", show_alert: true }).catch(() => {});
   return false;
 }
 
@@ -69,16 +69,22 @@ const quoteMsg = (ctx: Context) => {
   return id ? { reply_parameters: { message_id: id } } : {};
 };
 
-async function banUser(id: number, reason: string) {
+async function banUser(id: number, reason: string, actorId: number) {
   await getDb().transaction(async (tx) => {
-    await tx.update(users).set({ isBanned: true }).where(eq(users.telegramId, id));
+    await tx.update(users).set({ isBanned: true, banUntil: null }).where(eq(users.telegramId, id));
     const [open] = await tx
       .select({ id: bans.id })
       .from(bans)
-      .where(and(eq(bans.userId, id), eq(bans.unbannedAt, null as never)))
-      .limit(1)
-      .catch(() => [undefined] as const);
-    if (!open) await tx.insert(bans).values({ userId: id, reason });
+      .where(and(eq(bans.userId, id), isNull(bans.unbannedAt)))
+      .limit(1);
+    if (open) {
+      await tx
+        .update(bans)
+        .set({ reason, bannedBy: String(actorId), banUntil: null, bannedAt: new Date() })
+        .where(eq(bans.id, open.id));
+    } else {
+      await tx.insert(bans).values({ userId: id, reason, bannedBy: String(actorId) });
+    }
   });
 }
 
@@ -229,6 +235,10 @@ export function registerReports(bot: Bot) {
     if (!(await adminOnly(ctx))) return;
     const act = ctx.match[1];
     const id = Number(ctx.match[2]);
+    if (act === "ban" && !(await hasAdminPermission(ctx.from.id, "users_manage"))) {
+      await ctx.answerCallbackQuery({ text: "برای مسدودسازی کاربر مجوز جداگانه لازم است.", show_alert: true });
+      return;
+    }
     const db = getDb();
     const [r] = await db.select().from(reports).where(eq(reports.id, id));
     if (!r) return void (await ctx.answerCallbackQuery({ text: "گزارش پیدا نشد" }));
@@ -244,6 +254,8 @@ export function registerReports(bot: Bot) {
       return void (await showReport(ctx));
     }
 
+    await recordAdminAction(ctx.from.id, `report.${act}`, id, { targetUserId: r.targetId });
+
     if (status === "confirmed") {
       await addCoins(r.reporterId, COINS.reportReward, "report_reward", `report:${id}`).catch((e) =>
         console.error("report reward error:", e)
@@ -251,7 +263,10 @@ export function registerReports(bot: Bot) {
       await ctx.api
         .sendMessage(r.reporterId, `✅ گزارش شما تایید شد و ${COINS.reportReward} سکه هدیه گرفتی 🌹`)
         .catch(() => {});
-      if (act === "ban") await banUser(r.targetId, `report #${id}`);
+      if (act === "ban") {
+        await banUser(r.targetId, `report #${id}`, ctx.from.id);
+        await recordAdminAction(ctx.from.id, "user.ban", r.targetId, { reason: `report #${id}` });
+      }
     } else {
       await ctx.api
         .sendMessage(r.reporterId, "گزارش شما بررسی شد و تخلفی تایید نشد.")

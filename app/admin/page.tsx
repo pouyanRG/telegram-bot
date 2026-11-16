@@ -35,7 +35,7 @@ export default async function AdminPage({
     await getDb().transaction(async (tx) => {
       const updated = await tx
         .update(users)
-        .set({ isBanned: ban })
+          .set({ isBanned: ban, banUntil: null })
         .where(eq(users.telegramId, id))
         .returning({ id: users.telegramId });
       if (updated.length === 0) return;
@@ -47,7 +47,14 @@ export default async function AdminPage({
         .limit(1);
 
       if (ban) {
-        if (!open) await tx.insert(bans).values({ userId: id, reason: "manual" });
+        if (open) {
+          await tx
+            .update(bans)
+            .set({ reason: "manual", bannedBy: "admin", banUntil: null, bannedAt: new Date() })
+            .where(eq(bans.id, open.id));
+        } else {
+          await tx.insert(bans).values({ userId: id, reason: "manual" });
+        }
       } else {
         await tx
           .update(bans)

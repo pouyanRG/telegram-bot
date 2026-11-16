@@ -10,6 +10,7 @@ import {
   setNewsAlertsEnabled,
 } from "@/lib/news";
 import { getBot } from "@/lib/bot";
+import { isFeatureEnabled } from "@/lib/adminControls";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -36,6 +37,9 @@ export async function GET(request: Request) {
   if (!isAuthorized(request)) return new Response("Unauthorized", { status: 401 });
 
   try {
+    if (!(await isFeatureEnabled("news"))) {
+      return Response.json({ ok: true, disabled: true, notified: 0 });
+    }
     const [cursor, feed] = await Promise.all([getNewsAlertCursor(), refreshNewsFeed()]);
     const currentIds = feed.stories.map((story) => story.id);
     if (!cursor) {

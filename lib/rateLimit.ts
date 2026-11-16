@@ -1,5 +1,6 @@
 import { Ratelimit } from "@upstash/ratelimit";
 import { Redis } from "@upstash/redis";
+import { getAdminRateLimit } from "./adminControls";
 
 let _redis: Redis | null | undefined;
 
@@ -12,28 +13,30 @@ function redis() {
 }
 
 type Kind = "general";
-let _limiters: Record<Kind, Ratelimit> | null = null;
+let _limiter: { key: string; value: Ratelimit } | null = null;
 
-function limiters() {
+async function limiter(kind: Kind) {
   const r = redis();
   if (!r) return null;
-  return (_limiters ??= {
-    // همه‌ی آپدیت‌ها (پیام، دکمه، ...)
-    general: new Ratelimit({
-      redis: r,
-      limiter: Ratelimit.slidingWindow(10, "5 s"),
-      prefix: "rl:g",
-      timeout: 1000, // اگر Redis کند بود، اجازه بده (fail-open)
-    }),
+  const settings = await getAdminRateLimit();
+  const key = `${kind}:${settings.limit}:${settings.windowSeconds}`;
+  if (_limiter?.key === key) return _limiter.value;
+  const value = new Ratelimit({
+    redis: r,
+    limiter: Ratelimit.slidingWindow(settings.limit, `${settings.windowSeconds} s`),
+    prefix: "rl:g",
+    timeout: 1000,
   });
+  _limiter = { key, value };
+  return value;
 }
 
 /** true یعنی اجازه دارد */
 export async function checkRate(kind: Kind, userId: number) {
   try {
-    const l = limiters();
+    const l = await limiter(kind);
     if (!l) return true; // Redis تنظیم نشده
-    return (await l[kind].limit(String(userId))).success;
+    return (await l.limit(String(userId))).success;
   } catch (e) {
     console.error("rateLimit error:", e instanceof Error ? e.message : "unknown");
     return true; // قطع Redis نباید ربات را از کار بیندازد

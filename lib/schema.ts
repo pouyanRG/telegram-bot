@@ -23,6 +23,7 @@ export const users = pgTable("users", {
   language: text("language"),
   proUntil: ts("pro_until"),
   isBanned: boolean("is_banned").default(false).notNull(),
+  banUntil: ts("ban_until"),
   createdAt: ts("created_at").defaultNow().notNull(),
   lastSeenAt: ts("last_seen_at").defaultNow().notNull(),
   coins: integer("coins").default(0).notNull(),
@@ -37,6 +38,7 @@ export const bans = pgTable("bans", {
   reason: text("reason"),
   bannedBy: text("banned_by").default("admin").notNull(),
   bannedAt: ts("banned_at").defaultNow().notNull(),
+  banUntil: ts("ban_until"),
   unbannedAt: ts("unbanned_at"),
 });
 
@@ -93,8 +95,42 @@ export const voiceJobs = pgTable(
 export const admins = pgTable("admins", {
   userId: bigint("user_id", { mode: "number" }).primaryKey(),
   addedBy: bigint("added_by", { mode: "number" }).notNull(),
+  title: text("title"),
+  permissions: jsonb("permissions").$type<string[]>().default([]).notNull(),
   createdAt: ts("created_at").defaultNow().notNull(),
 });
+
+export const adminAuditLogs = pgTable(
+  "admin_audit_logs",
+  {
+    id: serial("id").primaryKey(),
+    actorId: bigint("actor_id", { mode: "number" }).notNull(),
+    action: text("action").notNull(),
+    targetId: bigint("target_id", { mode: "number" }),
+    details: jsonb("details").$type<Record<string, unknown>>().default(sql`'{}'::jsonb`).notNull(),
+    createdAt: ts("created_at").defaultNow().notNull(),
+  },
+  (t) => ({
+    byActor: index("admin_audit_actor_idx").on(t.actorId, t.createdAt),
+    byCreated: index("admin_audit_created_idx").on(t.createdAt),
+  })
+);
+
+export const feedback = pgTable(
+  "feedback",
+  {
+    id: serial("id").primaryKey(),
+    userId: bigint("user_id", { mode: "number" })
+      .notNull()
+      .references(() => users.telegramId, { onDelete: "cascade" }),
+    message: text("message").notNull(),
+    status: text("status").default("pending").notNull(),
+    handledBy: bigint("handled_by", { mode: "number" }),
+    handledAt: ts("handled_at"),
+    createdAt: ts("created_at").defaultNow().notNull(),
+  },
+  (t) => ({ byStatus: index("feedback_status_idx").on(t.status, t.id) })
+);
 
 
 // آپدیت‌های پردازش‌شده‌ی تلگرام؛ برای جلوگیری از پردازش تکراری

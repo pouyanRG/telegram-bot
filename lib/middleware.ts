@@ -1,7 +1,9 @@
 import type { Context, NextFunction } from "grammy";
 import { eq, sql } from "drizzle-orm";
 import { getDb } from "./db";
-import { processedUpdates, users } from "./schema";
+import { getMaintenanceMode, isFeatureEnabled, type ManagedFeature } from "./adminControls";
+import { isAdminUser } from "./admins";
+import { bans, processedUpdates, users } from "./schema";
 import { checkRate, shouldWarn } from "./rateLimit";
 
 // ---------- پاک‌سازی دوره‌ای ----------
@@ -19,6 +21,8 @@ async function housekeeping() {
         where (key like 'admin_login:%'
                and (data->>'resetAt')::bigint < (extract(epoch from now()) * 1000)::bigint)
            or (key like 'pending_sticker:%' and updated_at < now() - interval '1 day')
+           or (key like 'admin_input:%' and updated_at < now() - interval '1 day')
+           or (key like 'admin_search:%' and updated_at < now() - interval '7 days')
            or (key like 'report:%' and updated_at < now() - interval '1 day')
            or (key like 'coin:%' and updated_at < now() - interval '1 day')`,
     sql`delete from quotas where day < to_char(now() - interval '30 days', 'YYYY-MM-DD')`,
@@ -75,6 +79,7 @@ export async function userGuard(ctx: Context, next: NextFunction) {
     const [cur] = await db
       .select({
         isBanned: users.isBanned,
+        banUntil: users.banUntil,
         lastSeenAt: users.lastSeenAt,
         username: users.username,
         firstName: users.firstName,
@@ -84,7 +89,19 @@ export async function userGuard(ctx: Context, next: NextFunction) {
       .where(eq(users.telegramId, from.id));
 
     let isBanned: boolean;
-    if (
+    if (cur?.isBanned && cur.banUntil && cur.banUntil.getTime() <= Date.now()) {
+      await db.transaction(async (tx) => {
+        await tx
+          .update(users)
+          .set({ isBanned: false, banUntil: null })
+          .where(eq(users.telegramId, from.id));
+        await tx
+          .update(bans)
+          .set({ unbannedAt: new Date() })
+          .where(sql`${bans.userId} = ${from.id} and ${bans.unbannedAt} is null`);
+      });
+      isBanned = false;
+    } else if (
       cur &&
       cur.username === username &&
       cur.firstName === firstName &&
@@ -109,6 +126,14 @@ export async function userGuard(ctx: Context, next: NextFunction) {
       await ctx.reply("⛔️ دسترسی شما به ربات مسدود شده است.");
       return;
     }
+
+    if (await getMaintenanceMode()) {
+      if (!(await isAdminUser(from.id))) {
+        if (ctx.callbackQuery) await ctx.answerCallbackQuery();
+        await ctx.reply("🛠 ربات موقتاً در حال تعمیر است. لطفاً کمی بعد دوباره تلاش کن.");
+        return;
+      }
+    }
   } catch (e) {
     console.error("userGuard DB error:", e);
     if (ctx.callbackQuery) await ctx.answerCallbackQuery().catch(() => {});
@@ -117,6 +142,34 @@ export async function userGuard(ctx: Context, next: NextFunction) {
   }
 
   await next();
+}
+
+function updateFeature(ctx: Context): ManagedFeature | null {
+  const data = ctx.callbackQuery?.data;
+  if (data === "menu:voice" || data?.startsWith("voice:")) return "voice";
+  if (data === "menu:prices" || data === "prices:refresh" || data?.startsWith("coin:")) return "coin";
+  if (data === "menu:news" || data?.startsWith("news:")) return "news";
+  if (
+    ctx.message &&
+    "text" in ctx.message &&
+    typeof ctx.message.text === "string" &&
+    /^\/prices(?:@\w+)?(?:\s|$)/.test(ctx.message.text)
+  ) {
+    return "coin";
+  }
+  if (ctx.message && ("voice" in ctx.message || "audio" in ctx.message)) return "voice";
+  return null;
+}
+
+export async function featureGuard(ctx: Context, next: NextFunction) {
+  const feature = updateFeature(ctx);
+  if (!feature || !ctx.from || (await isAdminUser(ctx.from.id))) return next();
+
+  if (await isFeatureEnabled(feature)) return next();
+  if (ctx.callbackQuery) await ctx.answerCallbackQuery().catch(() => {});
+  await ctx.reply("⏸ این قابلیت موقتاً غیرفعال است.").catch((e) => {
+    console.error("feature notice error:", e);
+  });
 }
 
 export async function throttle(ctx: Context, next: NextFunction) {

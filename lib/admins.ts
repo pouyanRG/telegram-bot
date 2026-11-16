@@ -1,7 +1,22 @@
 import { eq } from "drizzle-orm";
 import type { Context } from "grammy";
 import { getDb } from "./db";
-import { admins, cache } from "./schema";
+import { adminAuditLogs, admins, cache } from "./schema";
+
+export const ADMIN_PERMISSIONS = [
+  { key: "dashboard", label: "داشبورد و آمار" },
+  { key: "users_view", label: "مشاهده و جستجوی کاربران" },
+  { key: "users_manage", label: "مسدودسازی کاربران" },
+  { key: "audit_view", label: "گزارش اقدامات ادمین‌ها" },
+  { key: "reports_manage", label: "بررسی گزارش‌ها" },
+  { key: "sticker_manage", label: "تنظیم استیکر پردازش" },
+  { key: "feedback_manage", label: "مدیریت بازخوردها" },
+  { key: "maintenance_manage", label: "حالت تعمیرات" },
+  { key: "features_manage", label: "فعال/غیرفعال‌کردن قابلیت‌ها" },
+  { key: "rate_limit_manage", label: "تنظیم محدودیت نرخ" },
+] as const;
+
+export type AdminPermission = (typeof ADMIN_PERMISSIONS)[number]["key"];
 
 // ---------- نقش‌ها ----------
 
@@ -18,8 +33,22 @@ export async function isAdminUser(id: number) {
   return !!r;
 }
 
+export async function hasAdminPermission(id: number, permission: AdminPermission) {
+  if (isOwner(id)) return true;
+  const [row] = await getDb()
+    .select({ permissions: admins.permissions })
+    .from(admins)
+    .where(eq(admins.userId, id));
+  return row?.permissions.includes(permission) ?? false;
+}
+
 export async function addAdmin(userId: number, addedBy: number) {
-  await getDb().insert(admins).values({ userId, addedBy }).onConflictDoNothing();
+  const rows = await getDb()
+    .insert(admins)
+    .values({ userId, addedBy, permissions: [] })
+    .onConflictDoNothing()
+    .returning({ userId: admins.userId });
+  return rows.length > 0;
 }
 
 export async function removeAdmin(userId: number) {
@@ -28,6 +57,31 @@ export async function removeAdmin(userId: number) {
 
 export async function listAdmins() {
   return getDb().select().from(admins);
+}
+
+export async function getAdminTitle(userId: number) {
+  if (isOwner(userId)) return "ادمین اصلی";
+  const [row] = await getDb()
+    .select({ title: admins.title })
+    .from(admins)
+    .where(eq(admins.userId, userId));
+  return row?.title ?? "ادمین";
+}
+
+export async function updateAdmin(
+  userId: number,
+  patch: { title?: string | null; permissions?: AdminPermission[] }
+) {
+  await getDb().update(admins).set(patch).where(eq(admins.userId, userId));
+}
+
+export async function recordAdminAction(
+  actorId: number,
+  action: string,
+  targetId: number | null = null,
+  details: Record<string, unknown> = {}
+) {
+  await getDb().insert(adminAuditLogs).values({ actorId, action, targetId, details });
 }
 
 // ---------- استیکر فکرکردن ----------
@@ -48,6 +102,10 @@ export async function setThinkingSticker(fileId: string) {
     .insert(cache)
     .values({ key: STICKER_KEY, data })
     .onConflictDoUpdate({ target: cache.key, set: { data, updatedAt: new Date() } });
+}
+
+export async function clearThinkingSticker() {
+  await getDb().delete(cache).where(eq(cache.key, STICKER_KEY));
 }
 
 /** ارسال استیکر (یا 🔎)، اجرای کار، و حذف پیام بعد از پایان (چه موفق چه خطا) */

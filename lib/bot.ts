@@ -20,10 +20,12 @@ import {
 } from "./news";
 import { Bot, GrammyError, InlineKeyboard, type Context } from "grammy";
 import { registerReports, clearReport } from "./reports";
+import { registerAdminPanel } from "./adminPanel";
 import { SETTINGS, quotaExceededMessage } from "./config";
 import { consumeQuota, refundQuota } from "./quota";
 import { getPrices, formatPrices, findCoin, formatCoin } from "./prices";
-import { dedupeUpdates, userGuard, throttle } from "./middleware";
+import { dedupeUpdates, featureGuard, userGuard, throttle } from "./middleware";
+import { isFeatureEnabled } from "./adminControls";
 import { mainMenu, BTN, idleKb } from "./menu";
 import { handleVoice, voiceGuide } from "./voice";
 import { clearMode, setVoiceMode } from "./mode";
@@ -33,12 +35,6 @@ import {
   addAdmin,
   isAdminUser,
   isOwner,
-  listAdmins,
-  ownerId,
-  removeAdmin,
-  getThinkingSticker,
-  setPendingSticker,
-  setThinkingSticker,
   takePendingSticker,
 } from "./admins";
 
@@ -48,8 +44,6 @@ let _bot: Bot | null = null;
 
 const WELCOME =
   "👋 <b>سلام!</b>\nاز منوی زیر انتخاب کن از کدام بخش می‌خواهی استفاده کنی:";
-
-const SETTINGS_TEXT = "⚙️ <b>تنظیمات</b>\nیکی از گزینه‌ها را انتخاب کن:";
 
 const HELP_USER = [
   "ℹ️ <b>راهنما</b>",
@@ -126,7 +120,6 @@ const pricesKb = new InlineKeyboard()
   .text("🔄 بروزرسانی", "prices:refresh")
   .row()
   .text("🏠 منوی اصلی", "menu:home");
-const cancelStickerKb = new InlineKeyboard().text("❌ انصراف", "admin:sticker_cancel");
 
 function newsHomeKb() {
   const kb = new InlineKeyboard();
@@ -214,16 +207,6 @@ function newsCardKeyboard(
   return kb;
 }
 
-const backToSettingsKb = new InlineKeyboard().text("🔙 برگشت", "menu:settings");
-
-/** دکمه‌های تنظیمات؛ فقط بعد از زدن «Setting» دیده می‌شوند و با «برگشت» از بین می‌روند */
-function settingsKb(owner: boolean) {
-  const kb = new InlineKeyboard().text("🎞 تنظیم استیکر فکرکردن", "admin:sticker").row();
-  kb.text("🚨 گزارش‌ها", "admin:reports").row();
-  if (owner) kb.text("👥 فهرست ادمین‌ها", "admin:list").row();
-  return kb.text("🔙 برگشت", "menu:home");
-}
-
 function coinKb(id: string) {
   return new InlineKeyboard()
     .text("🔄 بروزرسانی", `coin:${id}`)
@@ -247,11 +230,6 @@ async function editOrReply(ctx: Context, text: string, reply_markup: InlineKeybo
   }
 }
 
-function parseId(raw: unknown) {
-  const n = Number(String(raw ?? "").trim());
-  return Number.isSafeInteger(n) && n > 0 ? n : null;
-}
-
 /** منوی اصلی؛ گزینه‌های مدیریتی فقط برای ادمین‌ها نمایش داده می‌شوند */
 async function menuFor(ctx: Context) {
   const uid = ctx.from?.id;
@@ -271,14 +249,6 @@ async function resetState(ctx: Context) {
 
 async function clearLegacyReplyKeyboard(ctx: Context) {
   await ctx.reply("✅ منو به‌روز شد.", { reply_markup: { remove_keyboard: true } });
-}
-
-/** برای دکمه‌های مخصوص ادمین */
-async function requireAdminCb(ctx: Context) {
-  const uid = ctx.from?.id;
-  if (uid && (await isAdminUser(uid))) return true;
-  await ctx.answerCallbackQuery({ text: "⛔️ فقط ادمین", show_alert: true }).catch(() => {});
-  return false;
 }
 
 async function sendPrices(ctx: Context) {
@@ -510,6 +480,7 @@ export function getBot() {
   // اول ضد تکرار، بعد بررسی کاربر
   bot.use(dedupeUpdates);
   bot.use(userGuard);
+  bot.use(featureGuard);
   bot.use(throttle);
 
   // ================= دستورهای عمومی =================
@@ -561,132 +532,8 @@ export function getBot() {
     });
   });
 
-  // دکمه‌ی کیبورد پایین که هنوز بخشی پشتش نیست
-  bot.hears(BTN.feedback, async (ctx) => {
-    await resetState(ctx);
-    await ctx.reply("این بخش به‌زودی فعال می‌شود 🚧");
-  });
-
   registerReports(bot);
-
-  // ================= بخش ادمین =================
-
-  // --- ورود به تنظیمات (فقط ادمین) ---
-  bot.callbackQuery("menu:settings", async (ctx) => {
-    if (!(await requireAdminCb(ctx))) return;
-    await ctx.answerCallbackQuery();
-    await resetState(ctx);
-    await editOrReply(ctx, SETTINGS_TEXT, settingsKb(isOwner(ctx.from.id)));
-  });
-
-  // --- تنظیم استیکر فکرکردن ---
-  bot.callbackQuery("admin:sticker", async (ctx) => {
-    if (!(await requireAdminCb(ctx))) return;
-    await ctx.answerCallbackQuery();
-
-    const uid = ctx.from.id;
-    await clearMode(uid);
-    await setPendingSticker(uid);
-
-    // اگر استیکری از قبل تنظیم شده، پیش‌نمایشش را نشان بده
-    const current = await getThinkingSticker().catch(() => null);
-    if (current) {
-      await ctx.reply("استیکر فعلی:");
-      await ctx.replyWithSticker(current).catch(() => {});
-    } else {
-      await ctx.reply("الان استیکری تنظیم نیست؛ به‌جایش 🔎 ارسال می‌شود.");
-    }
-
-    await ctx.reply("🎞 حالا استیکر جدید (ترجیحاً متحرک) را بفرست.", {
-      reply_markup: cancelStickerKb,
-    });
-  });
-
-  bot.callbackQuery("admin:sticker_cancel", async (ctx) => {
-    if (!(await requireAdminCb(ctx))) return;
-    await takePendingSticker(ctx.from.id);
-    await ctx.answerCallbackQuery({ text: "لغو شد" });
-    await editOrReply(ctx, SETTINGS_TEXT, settingsKb(isOwner(ctx.from.id)));
-  });
-
-  // --- دریافت استیکر (فقط وقتی ادمین در حالت انتظار است؛ بدون محدودیت زمانی) ---
-  bot.on("message:sticker", async (ctx) => {
-    const uid = ctx.from.id;
-    if (!(await isAdminUser(uid))) return;
-    if (!(await takePendingSticker(uid))) return;
-
-    await setThinkingSticker(ctx.message.sticker.file_id);
-    await ctx.reply(
-      "✅ استیکر فکرکردن ذخیره شد. از این به بعد هنگام پردازش هوش مصنوعی نمایش داده می‌شود.",
-      { reply_markup: settingsKb(isOwner(uid)) }
-    );
-  });
-
-  // --- فهرست ادمین‌ها از داخل تنظیمات (فقط ادمین اصلی) ---
-  bot.callbackQuery("admin:list", async (ctx) => {
-    if (!isOwner(ctx.from.id)) {
-      return void (await ctx.answerCallbackQuery({ text: "⛔️ فقط ادمین اصلی", show_alert: true }));
-    }
-    await ctx.answerCallbackQuery();
-    const list = await listAdmins();
-    await editOrReply(
-      ctx,
-      [
-        `👑 ادمین اصلی: ${ownerId()}`,
-        "",
-        ...(list.length ? list.map((a) => `▫️ ${a.userId}`) : ["ادمین فرعی‌ای وجود ندارد."]),
-      ].join("\n"),
-      backToSettingsKb
-    );
-  });
-
-  // --- فقط ادمین اصلی (صاحب توکن): مدیریت ادمین‌های فرعی ---
-  bot.command("addadmin", async (ctx) => {
-    const owner = ctx.from?.id;
-    if (!owner || !isOwner(owner)) return;
-
-    const id = parseId(ctx.match);
-    if (!id) return void (await ctx.reply("استفاده: /addadmin 123456789"));
-    if (id === ownerId()) return void (await ctx.reply("تو ادمین اصلی هستی 👑"));
-
-    await addAdmin(id, owner);
-
-    // به ادمین جدید خبر بده (اگر قبلاً ربات را استارت کرده باشد)
-    const notified = await ctx.api
-      .sendMessage(id, "🛠 شما به‌عنوان ادمین ربات اضافه شدید. برای دیدن «⚙️ تنظیمات» یک بار /start بزنید.")
-      .then(() => true)
-      .catch(() => false);
-
-    await ctx.reply(
-      `✅ ${id} به ادمین‌های فرعی اضافه شد.` +
-        (notified ? "" : "\n⚠️ هنوز ربات را استارت نکرده؛ باید یک بار /start بزند.")
-    );
-  });
-
-  bot.command("removeadmin", async (ctx) => {
-    const owner = ctx.from?.id;
-    if (!owner || !isOwner(owner)) return;
-
-    const id = parseId(ctx.match);
-    if (!id) return void (await ctx.reply("استفاده: /removeadmin 123456789"));
-    if (id === ownerId()) return void (await ctx.reply("ادمین اصلی قابل حذف نیست."));
-
-    await removeAdmin(id);
-    await ctx.api.sendMessage(id, "دسترسی ادمین شما برداشته شد.").catch(() => {});
-    await ctx.reply(`🗑 ${id} از ادمین‌ها حذف شد.`);
-  });
-
-  bot.command("admins", async (ctx) => {
-    if (!ctx.from || !isOwner(ctx.from.id)) return;
-    const list = await listAdmins();
-    await ctx.reply(
-      [
-        `👑 ادمین اصلی: ${ownerId()}`,
-        "",
-        ...(list.length ? list.map((a) => `▫️ ${a.userId}`) : ["ادمین فرعی‌ای وجود ندارد."]),
-      ].join("\n")
-    );
-  });
+  registerAdminPanel(bot);
 
   // ================= ناوبری منو (ویرایش همان پیام) =================
 
@@ -1027,6 +874,9 @@ export function getBot() {
 
     // سهمیه‌ی روزانه‌ی جستجوی ارز (ادمین‌ها معاف)
     const uid = ctx.from.id;
+    if (!(await isFeatureEnabled("coin")) && !(await isAdminUser(uid))) {
+      return void (await ctx.reply("⏸ قابلیت جستجوی ارز موقتاً غیرفعال است."));
+    }
     let consumed = false;
     if (!(await isAdminUser(uid))) {
       const q = await consumeQuota(uid, "coin");
