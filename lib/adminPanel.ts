@@ -39,6 +39,39 @@ const PAGE_SIZE = 8;
 const BACK = new InlineKeyboard().text("🔙 بازگشت", "menu:settings");
 type PendingInput = { kind: string; target?: number };
 
+const ADMIN_PRESETS: Record<
+  string,
+  { title: string; permissions: AdminPermission[]; label: string }
+> = {
+  support: {
+    title: "پشتیبان",
+    label: "پشتیبان",
+    permissions: ["users_view", "reports_manage", "feedback_manage"],
+  },
+  moderator: {
+    title: "ناظر",
+    label: "ناظر",
+    permissions: ["dashboard", "users_view", "users_manage", "reports_manage", "audit_view"],
+  },
+  operator: {
+    title: "مدیر فنی",
+    label: "مدیر فنی",
+    permissions: [
+      "dashboard",
+      "sticker_manage",
+      "maintenance_manage",
+      "features_manage",
+      "rate_limit_manage",
+      "audit_view",
+    ],
+  },
+  custom: {
+    title: "ادمین",
+    label: "بدون قالب",
+    permissions: [],
+  },
+};
+
 const escapeHtml = (value: string) =>
   value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
@@ -222,6 +255,12 @@ async function showUser(ctx: Context, id: number) {
     return;
   }
   const keyboard = new InlineKeyboard();
+  if (isOwner(fromId(ctx))) {
+    const [existingAdmin] = await getDb().select({ userId: admins.userId }).from(admins).where(eq(admins.userId, id));
+    if (!existingAdmin && !isOwner(id)) {
+      keyboard.text("➕ افزودن به ادمین‌ها", `admin:staff:add:${id}`).row();
+    }
+  }
   if (await hasAdminPermission(fromId(ctx), "users_manage")) {
     if (user.isBanned) {
       keyboard.text("✅ رفع مسدودی", `admin:user:unban:${id}`).row();
@@ -299,6 +338,36 @@ async function showStaff(ctx: Context, userId: number) {
     ctx,
     `🛡 <b>مدیریت ادمین</b>\nشناسه: <code>${userId}</code>\nلقب: ${escapeHtml(admin.title ?? "ادمین فرعی")}\n\nدسترسی‌ها را جداگانه فعال یا غیرفعال کن.`,
     keyboard
+  );
+}
+
+function addAdminWizardKeyboard(userId: number) {
+  return new InlineKeyboard()
+    .text("📮 پشتیبان", `admin:staff:setup:${userId}:support`)
+    .text("🛡 ناظر", `admin:staff:setup:${userId}:moderator`)
+    .row()
+    .text("⚙️ مدیر فنی", `admin:staff:setup:${userId}:operator`)
+    .text("🎛 انتخاب دستی", `admin:staff:setup:${userId}:custom`)
+    .row()
+    .text("❌ انصراف", "admin:staff:list");
+}
+
+async function beginAddAdmin(ctx: Context, userId: number) {
+  if (!Number.isSafeInteger(userId) || userId <= 0 || isOwner(userId)) {
+    await ctx.answerCallbackQuery({ text: "شناسهٔ کاربر معتبر نیست.", show_alert: true }).catch(() => {});
+    return;
+  }
+  const [existing] = await getDb().select({ userId: admins.userId }).from(admins).where(eq(admins.userId, userId));
+  if (existing) {
+    await ctx.answerCallbackQuery({ text: "این کاربر از قبل ادمین است." }).catch(() => {});
+    await showStaff(ctx, userId);
+    return;
+  }
+  await ctx.answerCallbackQuery().catch(() => {});
+  await edit(
+    ctx,
+    `➕ <b>افزودن ادمین</b>\nکاربر: <code>${userId}</code>\n\nیک قالب دسترسی انتخاب کن. بعد از افزودن می‌توانی مجوزها و لقب را جداگانه ویرایش کنی.`,
+    addAdminWizardKeyboard(userId)
   );
 }
 
@@ -572,20 +641,49 @@ export function registerAdminPanel(bot: Bot) {
   bot.command("addadmin", async (ctx) => {
     const actor = ctx.from?.id;
     if (!actor || !isOwner(actor)) return;
-    const id = parseId(ctx.match);
-    if (!id) return void (await ctx.reply("استفاده: /addadmin 123456789"));
+    const forwarded = ctx.message?.reply_to_message?.forward_origin;
+    const forwardedId = forwarded?.type === "user" ? forwarded.sender_user.id : null;
+    const id = parseId(ctx.match) ?? forwardedId;
+    if (!id) {
+      return void (await ctx.reply(
+        "برای افزودن، از «تنظیمات ← کاربران» کاربر را جستجو و انتخاب کن؛ یا پیام او را برای بات فوروارد کن و با /addadmin به همان پیام پاسخ بده."
+      ));
+    }
     if (id === ownerId()) return void (await ctx.reply("تو ادمین اصلی هستی 👑"));
-    const added = await addAdmin(id, actor);
-    if (!added) return void (await ctx.reply(`${id} از قبل ادمین است.`));
-    await recordAdminAction(actor, "admin.add", id, { permissions: [] });
-    const notified = await ctx.api
-      .sendMessage(id, "🛠 شما به‌عنوان ادمین اضافه شدید؛ تا تعیین مجوزها دسترسی مدیریتی ندارید.")
-      .then(() => true)
-      .catch(() => false);
     await ctx.reply(
-      `✅ ${id} اضافه شد و فعلاً هیچ مجوزی ندارد.` +
-        (notified ? "" : "\n⚠️ برای شروع باید یک بار /start بزند.")
+      `${forwardedId ? "کاربر شناسایی‌شده" : "کاربر"}: ${id}\nقالب دسترسی را انتخاب کن:`,
+      { reply_markup: addAdminWizardKeyboard(id) }
     );
+  });
+
+  bot.callbackQuery(/^admin:staff:add:(\d+)$/, async (ctx) => {
+    if (!isOwner(ctx.from.id)) {
+      await ctx.answerCallbackQuery({ text: "⛔️ فقط ادمین اصلی.", show_alert: true });
+      return;
+    }
+    await beginAddAdmin(ctx, Number(ctx.match[1]));
+  });
+
+  bot.callbackQuery(/^admin:staff:setup:(\d+):(support|moderator|operator|custom)$/, async (ctx) => {
+    if (!isOwner(ctx.from.id)) {
+      await ctx.answerCallbackQuery({ text: "⛔️ فقط ادمین اصلی.", show_alert: true });
+      return;
+    }
+    const userId = Number(ctx.match[1]);
+    const preset = ADMIN_PRESETS[ctx.match[2]];
+    const added = await addAdmin(userId, ctx.from.id);
+    await updateAdmin(userId, { title: preset.title, permissions: preset.permissions });
+    await recordAdminAction(ctx.from.id, added ? "admin.add" : "admin.preset.update", userId, {
+      preset: ctx.match[2],
+      permissions: preset.permissions,
+    });
+    await ctx.answerCallbackQuery({ text: `قالب «${preset.label}» اعمال شد.` });
+    await showStaff(ctx, userId);
+    await ctx.api
+      .sendMessage(userId, `🛠 شما به‌عنوان «${preset.title}» به ربات اضافه شدید. دسترسی‌ها را از ادمین اصلی دریافت کرده‌اید.`)
+      .catch((error) => {
+        console.error("admin addition notification error:", error);
+      });
   });
 
   bot.command("removeadmin", async (ctx) => {
