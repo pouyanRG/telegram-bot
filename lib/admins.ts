@@ -14,6 +14,9 @@ export const ADMIN_PERMISSIONS = [
   { key: "maintenance_manage", label: "حالت تعمیرات" },
   { key: "features_manage", label: "فعال/غیرفعال‌کردن قابلیت‌ها" },
   { key: "rate_limit_manage", label: "تنظیم محدودیت نرخ" },
+  { key: "health_view", label: "پایش سلامت سرویس‌ها" },
+  { key: "errors_view", label: "مشاهدهٔ خطاهای مهم" },
+  { key: "export_data", label: "خروجی داده‌ها" },
 ] as const;
 
 export type AdminPermission = (typeof ADMIN_PERMISSIONS)[number]["key"];

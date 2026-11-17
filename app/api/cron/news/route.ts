@@ -11,6 +11,7 @@ import {
 } from "@/lib/news";
 import { getBot } from "@/lib/bot";
 import { isFeatureEnabled } from "@/lib/adminControls";
+import { logOperationalError } from "@/lib/operationalErrors";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -85,6 +86,7 @@ export async function GET(request: Request) {
           } else {
             deliveryError ??= error;
             console.error("news alert delivery failed:", error instanceof Error ? error.message : "unknown");
+            await logOperationalError("news.alert.delivery", error);
           }
         }
       }
@@ -95,6 +97,7 @@ export async function GET(request: Request) {
     return Response.json({ ok: true, newStories: newStories.length, notified });
   } catch (error) {
     console.error("news alert cron failed:", error instanceof Error ? error.message : "unknown");
+    await logOperationalError("news.alert.cron", error);
     return Response.json({ error: "News alert processing failed" }, { status: 503 });
   }
 }

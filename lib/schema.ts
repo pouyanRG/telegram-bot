@@ -132,6 +132,26 @@ export const feedback = pgTable(
   (t) => ({ byStatus: index("feedback_status_idx").on(t.status, t.id) })
 );
 
+export const operationalErrors = pgTable(
+  "operational_errors",
+  {
+    id: serial("id").primaryKey(),
+    fingerprint: text("fingerprint").notNull().unique(),
+    source: text("source").notNull(),
+    severity: text("severity").default("error").notNull(),
+    message: text("message").notNull(),
+    occurrences: integer("occurrences").default(1).notNull(),
+    firstSeenAt: ts("first_seen_at").defaultNow().notNull(),
+    lastSeenAt: ts("last_seen_at").defaultNow().notNull(),
+    lastNotifiedAt: ts("last_notified_at"),
+    resolvedAt: ts("resolved_at"),
+  },
+  (t) => ({
+    byLastSeen: index("operational_errors_last_seen_idx").on(t.lastSeenAt),
+    bySource: index("operational_errors_source_idx").on(t.source, t.lastSeenAt),
+  })
+);
+
 
 // آپدیت‌های پردازش‌شده‌ی تلگرام؛ برای جلوگیری از پردازش تکراری
 export const processedUpdates = pgTable(

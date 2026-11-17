@@ -4,10 +4,11 @@ import { webhookCallback } from "grammy";
 import type { Update } from "grammy/types";
 import { getBot } from "@/lib/bot";
 import { isAdmin } from "@/lib/adminAuth";
+import { logOperationalError } from "@/lib/operationalErrors";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-export const maxDuration = 60; // سقف پلن Hobby؛ اگر پلن بالاتر داری می‌توانی بیشترش کنی
+export const maxDuration = 300;
 
 // آپدیت‌های تلگرام کوچک‌اند؛ بدنه‌ی خیلی بزرگ قطعاً جعلی است
 const MAX_BODY_BYTES = 1_000_000;
@@ -36,7 +37,7 @@ let _handler: ((req: Request) => Promise<Response>) | null = null;
 function classicHandler() {
   return (_handler ??= webhookCallback(getBot(), "std/http", {
     secretToken: process.env.WEBHOOK_SECRET,
-    timeoutMilliseconds: 55_000,
+    timeoutMilliseconds: 280_000,
     // اگر پردازش طولانی شد، 200 بده تا تلگرام آپدیت را تکرار نکند
     onTimeout: "return",
   }));
@@ -61,6 +62,7 @@ async function ackFirst(req: Request) {
       await bot.handleUpdate(update);
     } catch (e) {
       console.error("webhook(after) error:", e instanceof Error ? e.message : "unknown");
+      await logOperationalError("webhook.after", e);
     } finally {
       console.log(`update ${update.update_id} done in ${Date.now() - t0}ms`);
     }
@@ -87,6 +89,7 @@ export async function POST(req: Request) {
   } catch (e) {
     // اگر 5xx برگردد، تلگرام همان آپدیت را بارها دوباره می‌فرستد (و پیام‌ها تکراری پردازش می‌شوند)
     console.error("webhook error:", e instanceof Error ? e.message : "unknown");
+    await logOperationalError("webhook.request", e);
     return new Response("ok", { status: 200 });
   }
 }

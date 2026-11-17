@@ -21,11 +21,13 @@ import {
 import { Bot, GrammyError, InlineKeyboard, type Context } from "grammy";
 import { registerReports, clearReport } from "./reports";
 import { registerAdminPanel } from "./adminPanel";
+import { registerMediaConvert } from "./mediaConvert";
 import { SETTINGS, quotaExceededMessage } from "./config";
 import { consumeQuota, refundQuota } from "./quota";
 import { getPrices, formatPrices, findCoin, formatCoin } from "./prices";
 import { dedupeUpdates, featureGuard, userGuard, throttle } from "./middleware";
 import { isFeatureEnabled } from "./adminControls";
+import { logOperationalError } from "./operationalErrors";
 import { mainMenu, BTN, idleKb } from "./menu";
 import { handleVoice, voiceGuide } from "./voice";
 import { clearMode, setVoiceMode } from "./mode";
@@ -534,6 +536,7 @@ export function getBot() {
 
   registerReports(bot);
   registerAdminPanel(bot);
+  registerMediaConvert(bot);
 
   // ================= ناوبری منو (ویرایش همان پیام) =================
 
@@ -912,7 +915,10 @@ export function getBot() {
     }
   });
 
-  bot.catch((err) => console.error("Bot error:", err));
+  bot.catch(async (err) => {
+    console.error("Bot error:", err);
+    await logOperationalError("telegram.bot", err.error);
+  });
 
   _bot = bot;
   return bot;

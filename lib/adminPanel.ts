@@ -1,5 +1,5 @@
 import { and, count, desc, eq, gt, ilike, isNull, or, sql } from "drizzle-orm";
-import { Bot, GrammyError, InlineKeyboard, type Context } from "grammy";
+import { Bot, GrammyError, InlineKeyboard, InputFile, type Context } from "grammy";
 import { getDb } from "./db";
 import {
   ADMIN_PERMISSIONS,
@@ -29,10 +29,21 @@ import {
   setFeatureEnabled,
   setMaintenanceMode,
 } from "./adminControls";
-import { admins, adminAuditLogs, bans, cache, feedback, reports, users, voiceJobs } from "./schema";
+import {
+  admins,
+  adminAuditLogs,
+  bans,
+  cache,
+  feedback,
+  operationalErrors,
+  reports,
+  users,
+  voiceJobs,
+} from "./schema";
 import { BTN, idleKb } from "./menu";
 import { clearMode } from "./mode";
 import { clearReport } from "./reports";
+import { buildAdminExport, collectHealthChecks } from "./adminObservability";
 
 const HTML = { parse_mode: "HTML" as const };
 const PAGE_SIZE = 8;
@@ -148,6 +159,9 @@ function settingsKeyboard(allowed: Set<AdminPermission>, owner: boolean) {
   if (allowed.has("features_manage")) kb.text("🎛 قابلیت‌ها", "admin:features").row();
   if (allowed.has("rate_limit_manage")) kb.text("⏱ محدودیت نرخ", "admin:rate").row();
   if (allowed.has("audit_view")) kb.text("🧾 گزارش اقدامات", "admin:audit").row();
+  if (allowed.has("health_view")) kb.text("🩺 سلامت سرویس‌ها", "admin:health").row();
+  if (allowed.has("errors_view")) kb.text("🚨 خطاهای مهم", "admin:errors").row();
+  if (allowed.has("export_data")) kb.text("📤 خروجی و پشتیبان", "admin:export").row();
   if (owner) kb.text("🛡 مدیریت ادمین‌ها", "admin:staff:list").row();
   return kb.text("🏠 منوی اصلی", "menu:home");
 }
@@ -724,6 +738,165 @@ export function registerAdminPanel(bot: Bot) {
       : "هنوز اقدامی ثبت نشده است.";
     await ctx.answerCallbackQuery();
     await edit(ctx, `🧾 <b>آخرین اقدامات مدیریتی</b>\n\n${text}`, BACK);
+  });
+
+  bot.callbackQuery("admin:health", async (ctx) => {
+    if (!(await permitted(ctx, "health_view"))) return;
+    await ctx.answerCallbackQuery({ text: "در حال بررسی سرویس‌ها…" });
+    const report = await collectHealthChecks();
+    const lines = report.checks.map(({ name, result }) => {
+      const icon = result.status === "ok" ? "✅" : result.status === "warning" ? "⚠️" : "❌";
+      const latency = result.latencyMs === undefined ? "" : ` · ${result.latencyMs}ms`;
+      return `${icon} ${name}: ${escapeHtml(result.detail)}${latency}`;
+    });
+    lines.push(
+      "",
+      `⏱ زمان فعالیت نمونه: ${Math.floor(report.runtime.uptimeSeconds / 3600)} ساعت`,
+      `🕒 آخرین بررسی: ${report.runtime.checkedAt}`,
+      `نسخه: ${escapeHtml(report.runtime.version)}`
+    );
+    await edit(
+      ctx,
+      `🩺 <b>سلامت سرویس‌ها</b>\n\n${lines.join("\n")}`,
+      new InlineKeyboard().text("🔄 بررسی دوباره", "admin:health").row().text("🔙 بازگشت", "menu:settings")
+    );
+  });
+
+  bot.callbackQuery("admin:errors", async (ctx) => {
+    if (!(await permitted(ctx, "errors_view"))) return;
+    const rows = await getDb()
+      .select()
+      .from(operationalErrors)
+      .where(isNull(operationalErrors.resolvedAt))
+      .orderBy(desc(operationalErrors.lastSeenAt))
+      .limit(10);
+    const keyboard = new InlineKeyboard();
+    for (const row of rows) {
+      keyboard.text(
+        `🚨 ${row.source} · ${row.occurrences} بار`,
+        `admin:error:${row.id}`
+      ).row();
+    }
+    keyboard
+      .text("🧹 پاک‌سازی خطاهای قدیمی", "admin:errors:cleanup")
+      .row()
+      .text("🔙 بازگشت", "menu:settings");
+    const text = rows.length
+      ? "خطاهای ثبت‌شدهٔ حل‌نشده (حداکثر ۱۰ مورد):"
+      : "✅ خطای حل‌نشده‌ای ثبت نشده است.";
+    await ctx.answerCallbackQuery();
+    await edit(ctx, `🚨 <b>خطاهای مهم</b>\n\n${text}`, keyboard);
+  });
+
+  bot.callbackQuery(/^admin:error:(\d+)$/, async (ctx) => {
+    if (!(await permitted(ctx, "errors_view"))) return;
+    const [row] = await getDb()
+      .select()
+      .from(operationalErrors)
+      .where(eq(operationalErrors.id, Number(ctx.match[1])));
+    if (!row) return void (await ctx.answerCallbackQuery({ text: "خطا پیدا نشد." }));
+    const keyboard = new InlineKeyboard()
+      .text("✅ علامت‌گذاری به‌عنوان حل‌شده", `admin:error:resolve:${row.id}`)
+      .row()
+      .text("⬅️ فهرست خطاها", "admin:errors");
+    await ctx.answerCallbackQuery();
+    await edit(
+      ctx,
+      [
+        `🚨 <b>${escapeHtml(row.source)}</b> · ${escapeHtml(row.severity)}`,
+        `تکرار: ${row.occurrences}`,
+        `اولین رخداد: ${row.firstSeenAt.toLocaleString("fa-IR", { timeZone: "Asia/Tehran" })}`,
+        `آخرین رخداد: ${row.lastSeenAt.toLocaleString("fa-IR", { timeZone: "Asia/Tehran" })}`,
+        "",
+        escapeHtml(row.message),
+      ].join("\n"),
+      keyboard
+    );
+  });
+
+  bot.callbackQuery(/^admin:error:resolve:(\d+)$/, async (ctx) => {
+    if (!(await permitted(ctx, "errors_view"))) return;
+    const id = Number(ctx.match[1]);
+    const rows = await getDb()
+      .update(operationalErrors)
+      .set({ resolvedAt: new Date() })
+      .where(and(eq(operationalErrors.id, id), isNull(operationalErrors.resolvedAt)))
+      .returning({ id: operationalErrors.id });
+    if (rows.length) await recordAdminAction(ctx.from.id, "operational_error.resolve", id);
+    await ctx.answerCallbackQuery({ text: rows.length ? "حل‌شده ثبت شد." : "این مورد قبلاً بسته شده." });
+    await edit(ctx, "✅ خطا به‌عنوان حل‌شده ثبت شد.", new InlineKeyboard().text("⬅️ خطاها", "admin:errors"));
+  });
+
+  bot.callbackQuery("admin:errors:cleanup", async (ctx) => {
+    if (!(await permitted(ctx, "errors_view"))) return;
+    const result = await getDb().execute(sql`
+      delete from operational_errors
+      where last_seen_at < now() - interval '30 days'
+    `);
+    await recordAdminAction(ctx.from.id, "operational_errors.cleanup", null, {
+      deleted: result.count ?? 0,
+    });
+    await ctx.answerCallbackQuery({ text: "خطاهای قدیمی پاک‌سازی شدند." });
+    await edit(
+      ctx,
+      `🧹 پاک‌سازی کامل شد. موارد حذف‌شده: ${result.count ?? 0}`,
+      new InlineKeyboard().text("⬅️ خطاها", "admin:errors")
+    );
+  });
+
+  bot.callbackQuery("admin:export", async (ctx) => {
+    if (!(await permitted(ctx, "export_data"))) return;
+    const keyboard = new InlineKeyboard()
+      .text("📄 کاربران CSV", "admin:export:users-csv")
+      .text("🧾 کاربران JSON", "admin:export:users-json")
+      .row()
+      .text("📊 آمار تجمیعی JSON", "admin:export:analytics")
+      .row()
+      .text("🛡 راهنمای پشتیبان‌گیری", "admin:backup:guide")
+      .row()
+      .text("🔙 بازگشت", "menu:settings");
+    await ctx.answerCallbackQuery();
+    await edit(
+      ctx,
+      "📤 <b>خروجی و پشتیبان‌گیری</b>\n\nفایل کاربران شناسه و اطلاعات هویتی مستقیم ندارد؛ شناسهٔ هر کاربر با HMAC ناشناس‌سازی می‌شود. فایل‌ها به همین گفت‌وگوی خصوصی ارسال می‌شوند.",
+      keyboard
+    );
+  });
+
+  bot.callbackQuery(/^admin:export:(users-csv|users-json|analytics)$/, async (ctx) => {
+    if (!(await permitted(ctx, "export_data"))) return;
+    await ctx.answerCallbackQuery({ text: "در حال آماده‌سازی فایل…" });
+    const kind = ctx.match[1] as "users-csv" | "users-json" | "analytics";
+    const output = await buildAdminExport(kind);
+    if (Buffer.byteLength(output.content, "utf8") > 10 * 1024 * 1024) {
+      await ctx.reply("فایل از سقف ۱۰ مگابایت بیشتر شد؛ تعداد کاربران را محدود کنید یا خروجی را از Supabase بگیرید.");
+      return;
+    }
+    await ctx.api.sendDocument(
+      ctx.from.id,
+      new InputFile(Buffer.from(output.content, "utf8"), output.filename),
+      { caption: `${output.description}${kind.startsWith("users-") ? "\nسقف خروجی: ۱۰٬۰۰۰ کاربر اول." : ""}` }
+    );
+    await recordAdminAction(ctx.from.id, "data.export", null, { kind });
+  });
+
+  bot.callbackQuery("admin:backup:guide", async (ctx) => {
+    if (!(await permitted(ctx, "export_data"))) return;
+    await ctx.answerCallbackQuery();
+    await edit(
+      ctx,
+      [
+        "🛡 <b>پشتیبان‌گیری و بازیابی امن</b>",
+        "",
+        "۱) در Supabase از بخش Database → Backups وضعیت و زمان‌بندی پشتیبان‌گیری پلن خود را بررسی کنید.",
+        "۲) برای خروجی دستی، از ابزار رسمی pg_dump با connection string محافظت‌شده استفاده کنید؛ فایل را در مخزن یا چت عمومی قرار ندهید.",
+        "۳) فایل پشتیبان را در فضای رمزگذاری‌شده و با دسترسی محدود نگه دارید.",
+        "۴) بازیابی را ابتدا روی یک پروژهٔ جداگانه آزمایش کنید؛ بازیابی پایگاه اصلی ممکن است داده‌های جدید را بازنویسی کند.",
+        "",
+        "این بات پشتیبان خام نمی‌سازد و بازیابی خودکار انجام نمی‌دهد؛ عملیات بازیابی فقط از داشبورد Supabase یا ابزار عملیاتی کنترل‌شده انجام شود.",
+      ].join("\n"),
+      BACK
+    );
   });
 
   bot.callbackQuery("admin:sticker", async (ctx) => {
