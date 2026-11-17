@@ -41,6 +41,6 @@ export function mainMenu(isAdmin = false) {
   return {
     keyboard,
     resize_keyboard: true,
-    is_persistent: true,
+    input_field_placeholder: "یک گزینه را انتخاب کن...",
   };
 }
