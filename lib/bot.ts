@@ -28,7 +28,7 @@ import { getPrices, formatPrices, findCoin, formatCoin } from "./prices";
 import { dedupeUpdates, featureGuard, userGuard, throttle } from "./middleware";
 import { isFeatureEnabled } from "./adminControls";
 import { logOperationalError } from "./operationalErrors";
-import { mainMenu, BTN, idleKb } from "./menu";
+import { mainMenu, BTN } from "./menu";
 import { handleVoice, voiceGuide } from "./voice";
 import { clearMode, setVoiceMode } from "./mode";
 import { getCoins } from "./coins";
@@ -514,9 +514,10 @@ export function getBot() {
   bot.hears(BTN.menu, showHome);
   bot.hears(BTN.help, async (ctx) => {
     await resetState(ctx);
+    const id = ctx.from?.id;
     let text = HELP_USER;
-    if (await isAdminUser(ctx.from.id)) text += "\n" + HELP_ADMIN;
-    if (isOwner(ctx.from.id)) text += "\n" + HELP_OWNER;
+    if (id && (await isAdminUser(id))) text += "\n" + HELP_ADMIN;
+    if (id && isOwner(id)) text += "\n" + HELP_OWNER;
     await ctx.reply(text, { ...HTML, reply_markup: await menuFor(ctx) });
   });
 
@@ -531,8 +532,10 @@ export function getBot() {
   });
 
   bot.hears(BTN.voice, async (ctx) => {
-    await takePendingSticker(ctx.from.id).catch(() => {});
-    await setVoiceMode(ctx.from.id);
+    const id = ctx.from?.id;
+    if (!id) return;
+    await takePendingSticker(id).catch(() => {});
+    await setVoiceMode(id);
     await voiceGuide(ctx);
   });
 

@@ -2,11 +2,13 @@ const DEFS = {
   help: { emoji: "❓", text: "راهنما" },
   feedback: { emoji: "📮", text: "انتقادات و پیشنهادات" },
   prices: { emoji: "💰", text: "رمزارزها" },
+  coins: { emoji: "🪙", text: "سکه" },
   voice: { emoji: "🎙", text: "ویس به متن" },
   news: { emoji: "📰", text: "اخبار روز" },
   mediaStickers: { emoji: "🎨", text: "استیکر و گیف" },
   mediaVideoNote: { emoji: "📽️", text: "ویدیو مسیج" },
   settings: { emoji: "⚙️", text: "تنظیمات" },
+  menu: { emoji: "🏠", text: "منوی اصلی" },
 } as const;
 
 type Key = keyof typeof DEFS;
@@ -17,6 +19,7 @@ export const BTN = {
   help: label("help"),
   feedback: label("feedback"),
   prices: label("prices"),
+  coins: label("coins"),
   voice: label("voice"),
   news: label("news"),
   mediaStickers: label("mediaStickers"),
