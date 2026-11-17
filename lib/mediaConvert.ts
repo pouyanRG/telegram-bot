@@ -9,6 +9,7 @@ import { logOperationalError } from "./operationalErrors";
 import { downloadTelegramFile } from "./telegramFile";
 import { UserError } from "./errors";
 import { clearMode, getMode, setMediaMode } from "./mode";
+import { BTN } from "./menu";
 import { cache } from "./schema";
 import {
   convertMedia,
@@ -38,17 +39,17 @@ type ConversionState = {
 
 const actions = {
   video: [
-    { kind: "video-animation", label: "🎞 گیف/انیمیشن", message: "انیمیشن آماده شد." },
-    { kind: "video-sticker", label: "🎟 استیکر ویدیویی", message: "استیکر ویدیویی آماده شد." },
+    { kind: "video-animation", label: "🎞 تبدیل به گیف", message: "گیف آماده شد." },
+    { kind: "video-sticker", label: "🎟 تبدیل به استیکر", message: "استیکر آماده شد." },
     { kind: "video-sticker", label: "➕ افزودن به پک", message: "استیکر به پک اضافه شد.", pack: true },
   ],
   photo: [
-    { kind: "photo-sticker", label: "🎟 استیکر ثابت", message: "استیکر ثابت آماده شد." },
+    { kind: "photo-sticker", label: "🎟 تبدیل به استیکر", message: "استیکر آماده شد." },
     { kind: "photo-sticker", label: "➕ افزودن به پک", message: "استیکر به پک اضافه شد.", pack: true },
     { kind: "photo-animation", label: "🎞 تبدیل به گیف", message: "گیف آماده شد." },
   ],
   animation: [
-    { kind: "video-sticker", label: "🎟 استیکر ویدیویی", message: "استیکر ویدیویی آماده شد." },
+    { kind: "video-sticker", label: "🎟 تبدیل به استیکر", message: "استیکر آماده شد." },
     { kind: "video-sticker", label: "➕ افزودن به پک", message: "استیکر به پک اضافه شد.", pack: true },
   ],
   staticSticker: [
@@ -56,7 +57,7 @@ const actions = {
     { kind: "photo-animation", label: "🎞 تبدیل به گیف", message: "گیف آماده شد." },
   ],
   videoSticker: [
-    { kind: "sticker-animation", label: "🎞 تبدیل به انیمیشن", message: "انیمیشن آماده شد." },
+    { kind: "sticker-animation", label: "🎞 تبدیل به گیف", message: "گیف آماده شد." },
   ],
 } satisfies Record<string, ConversionAction[]>;
 
@@ -150,7 +151,7 @@ function mediaGuide(mode: "media_stickers" | "media_video_note") {
         keyboard,
       }
     : {
-        text: "⭕ <b>ویدیو مسیج</b>\nیک ویدیو بفرست تا به ویدیو مسیج تبدیل شود. ویدیوهای بیشتر از ۶۰ ثانیه خودکار تا ۶۰ ثانیه بریده می‌شوند.",
+        text: "📽️ <b>ویدیو مسیج</b>\nیک ویدیو بفرست تا به ویدیو مسیج تبدیل شود. ویدیوهای بیشتر از ۶۰ ثانیه خودکار تا ۶۰ ثانیه بریده می‌شوند.",
         keyboard,
       };
 }
@@ -221,19 +222,28 @@ function userFacingError(error: unknown) {
 }
 
 export function registerMediaConvert(bot: Bot) {
+  const startMediaMode = async (
+    ctx: Context,
+    mode: "media_stickers" | "media_video_note"
+  ) => {
+    await setMediaMode(ctx.from!.id, mode);
+    const selectedGuide = mediaGuide(mode);
+    await ctx.reply(selectedGuide.text, {
+      parse_mode: "HTML",
+      reply_markup: selectedGuide.keyboard,
+    });
+  };
+
   bot.callbackQuery("menu:media:stickers", async (ctx) => {
     await ctx.answerCallbackQuery();
-    await setMediaMode(ctx.from.id, "media_stickers");
-    const guide = mediaGuide("media_stickers");
-    await ctx.reply(guide.text, { parse_mode: "HTML", reply_markup: guide.keyboard });
+    await startMediaMode(ctx, "media_stickers");
   });
-
   bot.callbackQuery("menu:media:video_note", async (ctx) => {
     await ctx.answerCallbackQuery();
-    await setMediaMode(ctx.from.id, "media_video_note");
-    const guide = mediaGuide("media_video_note");
-    await ctx.reply(guide.text, { parse_mode: "HTML", reply_markup: guide.keyboard });
+    await startMediaMode(ctx, "media_video_note");
   });
+  bot.hears(BTN.mediaStickers, (ctx) => startMediaMode(ctx, "media_stickers"));
+  bot.hears(BTN.mediaVideoNote, (ctx) => startMediaMode(ctx, "media_video_note"));
 
   bot.callbackQuery("media:cancel", async (ctx) => {
     await ctx.answerCallbackQuery();
@@ -251,7 +261,7 @@ export function registerMediaConvert(bot: Bot) {
         ctx,
         "media_video_note",
         { fileId: video.file_id, size: video.file_size },
-        [{ kind: "video-note", label: "⭕ تبدیل به ویدیو مسیج", message: "ویدیو مسیج آماده شد." }],
+        [{ kind: "video-note", label: "📽️ تبدیل به ویدیو مسیج", message: "ویدیو مسیج آماده شد." }],
         "",
         ctx.message.message_id
       );

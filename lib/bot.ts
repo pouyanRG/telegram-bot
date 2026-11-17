@@ -28,7 +28,7 @@ import { getPrices, formatPrices, findCoin, formatCoin } from "./prices";
 import { dedupeUpdates, featureGuard, userGuard, throttle } from "./middleware";
 import { isFeatureEnabled } from "./adminControls";
 import { logOperationalError } from "./operationalErrors";
-import { mainMenu, BTN, idleKb } from "./menu";
+import { mainMenu, BTN } from "./menu";
 import { handleVoice, voiceGuide } from "./voice";
 import { clearMode, setVoiceMode } from "./mode";
 import { getCoins } from "./coins";
@@ -113,8 +113,6 @@ function normalizeFa(s: string) {
 }
 
 // ---------- کیبوردهای داخل پیام ----------
-
-const homeKb = new InlineKeyboard().text("🏠 منوی اصلی", "menu:home");
 
 type NewsListKind = "all" | "unread" | "favorites" | "history";
 
@@ -247,10 +245,6 @@ async function resetState(ctx: Context) {
     takePendingSticker(uid),
     clearReport(uid),
   ]).catch((e) => console.error("resetState error:", e));
-}
-
-async function clearLegacyReplyKeyboard(ctx: Context) {
-  await ctx.reply("✅ منو به‌روز شد.", { reply_markup: { remove_keyboard: true } });
 }
 
 async function sendPrices(ctx: Context) {
@@ -462,10 +456,9 @@ async function sendNewsCard(
 
 // ---------- شروع و منوی اصلی ----------
 
-/** /menu و دکمه‌ی «📋 منو»: منوی اینلاین اصلی */
+/** /menu و دکمه‌ی پایین «منو»: نمایش کیبورد اصلی */
 async function showHome(ctx: Context) {
   await resetState(ctx);
-  await clearLegacyReplyKeyboard(ctx);
   await ctx.reply(WELCOME, { ...HTML, reply_markup: await menuFor(ctx) });
 }
 
@@ -496,12 +489,11 @@ export function getBot() {
 
   bot.command("help", async (ctx) => {
     await resetState(ctx);
-    await clearLegacyReplyKeyboard(ctx);
     const id = ctx.from?.id;
     let text = HELP_USER;
     if (id && (await isAdminUser(id))) text += "\n" + HELP_ADMIN;
     if (id && isOwner(id)) text += "\n" + HELP_OWNER;
-    await ctx.reply(text, { ...HTML, reply_markup: homeKb });
+    await ctx.reply(text, { ...HTML, reply_markup: await menuFor(ctx) });
   });
 
   bot.command("prices", async (ctx) => {
@@ -520,8 +512,26 @@ export function getBot() {
   bot.hears(BTN.menu, showHome);
   bot.hears(BTN.help, async (ctx) => {
     await resetState(ctx);
-    await clearLegacyReplyKeyboard(ctx);
-    await ctx.reply(HELP_USER, { ...HTML, reply_markup: homeKb });
+    let text = HELP_USER;
+    if (await isAdminUser(ctx.from!.id)) text += "\n" + HELP_ADMIN;
+    if (isOwner(ctx.from!.id)) text += "\n" + HELP_OWNER;
+    await ctx.reply(text, { ...HTML, reply_markup: await menuFor(ctx) });
+  });
+
+  bot.hears(BTN.prices, async (ctx) => {
+    await resetState(ctx);
+    await sendPrices(ctx);
+  });
+
+  bot.hears(BTN.news, async (ctx) => {
+    await resetState(ctx);
+    await ctx.reply(newsHomeText(), { ...HTML, reply_markup: newsHomeKb() });
+  });
+
+  bot.hears(BTN.voice, async (ctx) => {
+    await takePendingSticker(ctx.from!.id).catch(() => {});
+    await setVoiceMode(ctx.from!.id);
+    await voiceGuide(ctx);
   });
 
   // 💰 سکه
@@ -534,30 +544,25 @@ export function getBot() {
     });
   });
 
+  registerMediaConvert(bot);
   registerReports(bot);
   registerAdminPanel(bot);
-  registerMediaConvert(bot);
 
   // ================= ناوبری منو (ویرایش همان پیام) =================
 
   bot.callbackQuery("menu:home", async (ctx) => {
     await ctx.answerCallbackQuery();
     await resetState(ctx);
-    await clearLegacyReplyKeyboard(ctx);
-    const message = ctx.callbackQuery.message;
-    if (message && "photo" in message && message.photo?.length) {
-      await ctx.deleteMessage();
-      await ctx.reply(WELCOME, { ...HTML, reply_markup: await menuFor(ctx) });
-      return;
-    }
-    await editOrReply(ctx, WELCOME, await menuFor(ctx));
+    await ctx.reply(WELCOME, { ...HTML, reply_markup: await menuFor(ctx) });
   });
 
   bot.callbackQuery("menu:help", async (ctx) => {
     await ctx.answerCallbackQuery();
     await resetState(ctx);
-    await clearLegacyReplyKeyboard(ctx);
-    await editOrReply(ctx, HELP_USER, homeKb);
+    let text = HELP_USER;
+    if (await isAdminUser(ctx.from.id)) text += "\n" + HELP_ADMIN;
+    if (isOwner(ctx.from.id)) text += "\n" + HELP_OWNER;
+    await ctx.reply(text, { ...HTML, reply_markup: await menuFor(ctx) });
   });
 
   // ================= قیمت‌ها =================

@@ -4,8 +4,8 @@ import { getDb } from "./db";
 import { bans, cache, reports, users } from "./schema";
 import { COINS } from "./config";
 import { addCoins } from "./coins";
-import { hasAdminPermission, ownerId, recordAdminAction } from "./admins";
-import { idleKb } from "./menu";
+import { hasAdminPermission, isAdminUser, ownerId, recordAdminAction } from "./admins";
+import { mainMenu } from "./menu";
 
 const HTML = { parse_mode: "HTML" as const };
 const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
@@ -166,7 +166,7 @@ export function registerReports(bot: Bot) {
 
     if (text === REPORT_BACK) {
       await clearReport(uid);
-      return void (await ctx.reply("گزارش لغو شد.", { reply_markup: idleKb }));
+      return void (await ctx.reply("گزارش لغو شد.", { reply_markup: mainMenu(await isAdminUser(uid)) }));
     }
     const len = [...text].length;
     if (len < 5 || len > 1000) {
@@ -178,12 +178,15 @@ export function registerReports(bot: Bot) {
 
     if (res === "duplicate") {
       return void (await ctx.reply("قبلاً درباره‌ی این کاربر گزارشی ثبت کرده‌ای که در حال بررسی است.", {
-        reply_markup: idleKb,
+        reply_markup: mainMenu(await isAdminUser(uid)),
       }));
     }
     await ctx.reply(
       "✅ با تشکر از همکاری شما، گزارش شما با موفقیت ثبت شد و بزودی بررسی خواهد شد 🌹\n\nخب ، حالا چه کاری برات انجام بدم؟",
-      { reply_parameters: { message_id: ctx.message.message_id }, reply_markup: idleKb }
+      {
+        reply_parameters: { message_id: ctx.message.message_id },
+        reply_markup: mainMenu(await isAdminUser(uid)),
+      }
     );
     const owner = ownerId();
     if (owner) {

@@ -40,7 +40,7 @@ import {
   users,
   voiceJobs,
 } from "./schema";
-import { BTN, idleKb } from "./menu";
+import { BTN, mainMenu } from "./menu";
 import { clearMode } from "./mode";
 import { clearReport } from "./reports";
 import { buildAdminExport, collectHealthChecks } from "./adminObservability";
@@ -173,11 +173,13 @@ async function showSettings(ctx: Context) {
   for (const permission of ADMIN_PERMISSIONS) {
     if (await hasAdminPermission(id, permission.key)) allowed.add(permission.key);
   }
-  await edit(
-    ctx,
-    `⚙️ <b>مدیریت ربات</b>\nدسترسی: ${escapeHtml(title)}\nگزینه‌های قابل‌دسترسی برای حساب شما:`,
-    settingsKeyboard(allowed, isOwner(id))
-  );
+  const text = `⚙️ <b>مدیریت ربات</b>\nدسترسی: ${escapeHtml(title)}\nگزینه‌های قابل‌دسترسی برای حساب شما:`;
+  const keyboard = settingsKeyboard(allowed, isOwner(id));
+  if (ctx.callbackQuery) {
+    await edit(ctx, text, keyboard);
+  } else {
+    await ctx.reply(text, { ...HTML, reply_markup: keyboard });
+  }
 }
 
 async function showDashboard(ctx: Context) {
@@ -417,6 +419,14 @@ async function showFeedbackItem(ctx: Context, id: number) {
 }
 
 export function registerAdminPanel(bot: Bot) {
+  bot.hears(BTN.settings, async (ctx) => {
+    if (!(await isAdminUser(fromId(ctx)))) {
+      await ctx.reply("⛔️ فقط ادمین.");
+      return;
+    }
+    await showSettings(ctx);
+  });
+
   bot.hears(BTN.feedback, async (ctx) => {
     const userId = fromId(ctx);
     await clearReport(userId);
@@ -442,7 +452,7 @@ export function registerAdminPanel(bot: Bot) {
         .values({ userId: ctx.from.id, message: text })
         .returning({ id: feedback.id });
       await ctx.reply("✅ بازخوردت ثبت شد. ممنون از اینکه کمک می‌کنی ربات بهتر شود.", {
-        reply_markup: idleKb,
+        reply_markup: mainMenu(await isAdminUser(ctx.from.id)),
       });
       const owner = ownerId();
       if (owner) {
