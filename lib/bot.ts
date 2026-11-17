@@ -19,7 +19,6 @@ import {
   type NewsStory,
 } from "./news";
 import { Bot, GrammyError, InlineKeyboard, type Context } from "grammy";
-import { registerReports, clearReport } from "./reports";
 import { registerAdminPanel } from "./adminPanel";
 import { registerMediaConvert } from "./mediaConvert";
 import { SETTINGS, quotaExceededMessage } from "./config";
@@ -243,7 +242,6 @@ async function resetState(ctx: Context) {
   await Promise.all([
     clearMode(uid),
     takePendingSticker(uid),
-    clearReport(uid),
   ]).catch((e) => console.error("resetState error:", e));
 }
 
@@ -537,7 +535,6 @@ export function getBot() {
     await voiceGuide(ctx);
   });
 
-  registerReports(bot);
   registerAdminPanel(bot);
   registerMediaConvert(bot);
 

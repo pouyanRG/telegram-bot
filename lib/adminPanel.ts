@@ -36,13 +36,11 @@ import {
   cache,
   feedback,
   operationalErrors,
-  reports,
   users,
   voiceJobs,
 } from "./schema";
 import { BTN, mainMenu } from "./menu";
 import { clearMode } from "./mode";
-import { clearReport } from "./reports";
 import { buildAdminExport, collectHealthChecks } from "./adminObservability";
 
 const HTML = { parse_mode: "HTML" as const };
@@ -57,12 +55,12 @@ const ADMIN_PRESETS: Record<
   support: {
     title: "پشتیبان",
     label: "پشتیبان",
-    permissions: ["users_view", "reports_manage", "feedback_manage"],
+    permissions: ["users_view", "feedback_manage"],
   },
   moderator: {
     title: "ناظر",
     label: "ناظر",
-    permissions: ["dashboard", "users_view", "users_manage", "reports_manage", "audit_view"],
+    permissions: ["dashboard", "users_view", "users_manage", "audit_view"],
   },
   operator: {
     title: "مدیر فنی",
@@ -152,7 +150,6 @@ function settingsKeyboard(allowed: Set<AdminPermission>, owner: boolean) {
   const kb = new InlineKeyboard();
   if (allowed.has("dashboard")) kb.text("📊 داشبورد و آمار", "admin:dashboard").row();
   if (allowed.has("users_view")) kb.text("👥 کاربران", "admin:users").row();
-  if (allowed.has("reports_manage")) kb.text("🚨 گزارش‌ها", "admin:reports").row();
   if (allowed.has("feedback_manage")) kb.text("📮 بازخوردها", "admin:feedback").row();
   if (allowed.has("sticker_manage")) kb.text("🎞 استیکر پردازش", "admin:sticker").row();
   if (allowed.has("maintenance_manage")) kb.text("🛠 حالت تعمیرات", "admin:maintenance").row();
@@ -184,12 +181,11 @@ async function showSettings(ctx: Context) {
 
 async function showDashboard(ctx: Context) {
   const db = getDb();
-  const [[total], [active], [banned], [reportsPending], [feedbackPending], [failedJobs]] =
+  const [[total], [active], [banned], [feedbackPending], [failedJobs]] =
     await Promise.all([
       db.select({ value: count() }).from(users),
       db.select({ value: count() }).from(users).where(gt(users.lastSeenAt, sql`now() - interval '24 hours'`)),
       db.select({ value: count() }).from(users).where(eq(users.isBanned, true)),
-      db.select({ value: count() }).from(reports).where(eq(reports.status, "pending")),
       db.select({ value: count() }).from(feedback).where(eq(feedback.status, "pending")),
       db.select({ value: count() }).from(voiceJobs).where(
         and(eq(voiceJobs.status, "failed"), gt(voiceJobs.createdAt, sql`now() - interval '24 hours'`))
@@ -204,7 +200,6 @@ async function showDashboard(ctx: Context) {
       `👥 کاربران: ${total.value}`,
       `🟢 فعال در ۲۴ ساعت اخیر: ${active.value}`,
       `⛔️ مسدود: ${banned.value}`,
-      `🚨 گزارش‌های بررسی‌نشده: ${reportsPending.value}`,
       `📮 بازخوردهای بررسی‌نشده: ${feedbackPending.value}`,
       `⚠️ کارهای ویس ناموفق در ۲۴ ساعت: ${failedJobs.value}`,
     ].join("\n"),
@@ -428,7 +423,6 @@ export function registerAdminPanel(bot: Bot) {
 
   bot.hears(BTN.feedback, async (ctx) => {
     const userId = fromId(ctx);
-    await clearReport(userId);
     await clearMode(userId);
     await takePendingSticker(userId);
     await promptInput(ctx, "📮 پیام یا پیشنهادت را در یک پیام بفرست (۱۰ تا ۲۰۰۰ نویسه).", {

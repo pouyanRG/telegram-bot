@@ -28,11 +28,10 @@ export const BTN = {
 
 export function mainMenu(isAdmin = false) {
   const keyboard = [
-    [BTN.prices, BTN.voice],
-    [BTN.news, BTN.mediaStickers],
-    [BTN.mediaVideoNote, BTN.help],
-    [BTN.feedback],
-    [BTN.menu],
+    [BTN.voice],
+    [BTN.news,BTN.prices,],
+    [BTN.mediaVideoNote, BTN.mediaStickers],
+    [BTN.feedback, BTN.help],
   ];
   if (isAdmin) keyboard.push([BTN.settings]);
 

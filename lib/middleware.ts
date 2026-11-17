@@ -24,7 +24,7 @@ async function housekeeping() {
            or (key like 'admin_input:%' and updated_at < now() - interval '1 day')
            or (key like 'admin_search:%' and updated_at < now() - interval '7 days')
            or (key like 'media_conversion:%' and updated_at < now() - interval '10 minutes')
-           or (key like 'report:%' and updated_at < now() - interval '1 day')
+           or key like 'report:%'
            or (key like 'coin:%' and updated_at < now() - interval '1 day')`,
     sql`delete from quotas where day < to_char(now() - interval '30 days', 'YYYY-MM-DD')`,
     sql`delete from voice_jobs

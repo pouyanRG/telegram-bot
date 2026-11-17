@@ -8,7 +8,6 @@ export const ADMIN_PERMISSIONS = [
   { key: "users_view", label: "مشاهده و جستجوی کاربران" },
   { key: "users_manage", label: "مسدودسازی کاربران" },
   { key: "audit_view", label: "گزارش اقدامات ادمین‌ها" },
-  { key: "reports_manage", label: "بررسی گزارش‌ها" },
   { key: "sticker_manage", label: "تنظیم استیکر پردازش" },
   { key: "feedback_manage", label: "مدیریت بازخوردها" },
   { key: "maintenance_manage", label: "حالت تعمیرات" },

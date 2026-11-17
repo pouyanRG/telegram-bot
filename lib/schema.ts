@@ -163,24 +163,3 @@ export const processedUpdates = pgTable(
     byCreated: index("processed_updates_created_idx").on(t.createdAt),
   })
 );
-
-// گزارش تخلف؛ status: pending | confirmed | rejected
-export const reports = pgTable(
-  "reports",
-  {
-    id: serial("id").primaryKey(),
-    reporterId: bigint("reporter_id", { mode: "number" })
-      .notNull()
-      .references(() => users.telegramId, { onDelete: "cascade" }),
-    targetId: bigint("target_id", { mode: "number" })
-      .notNull()
-      .references(() => users.telegramId, { onDelete: "cascade" }),
-    reason: text("reason").notNull(),
-    details: text("details").notNull(),
-    status: text("status").default("pending").notNull(),
-    reviewedBy: bigint("reviewed_by", { mode: "number" }),
-    reviewedAt: ts("reviewed_at"),
-    createdAt: ts("created_at").defaultNow().notNull(),
-  },
-  (t) => ({ byStatus: index("reports_status_idx").on(t.status, t.id) })
-);
