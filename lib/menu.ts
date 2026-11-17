@@ -2,16 +2,17 @@ import { InlineKeyboard } from "grammy";
 
 export function mainMenu(isAdmin = false) {
   const kb = new InlineKeyboard()
-    .text("💰 رمزارزها", "menu:prices")
-    .row()
     .text("🎙 ویس به متن", "menu:voice")
     .row()
-    .text("🎨 استیکر و گیف", "menu:media:stickers")
-    .text("⭕ ویدیو مسیج", "menu:media:video_note")
+    .text("💰 رمزارزها", "menu:prices")
     .row()
     .text("📰 اخبار روز", "menu:news")
     .row()
-    .text("ℹ️ راهنما", "menu:help");
+    .text("🎨 استیکر و گیف", "menu:media:stickers")
+    .row()
+    .text("📽️ ویدیو مسیج", "menu:media:video_note")
+    .row()
+    .text("راهنما", "menu:help");
 
   if (isAdmin) kb.row().text("⚙️ تنظیمات", "menu:settings");
   return kb;
