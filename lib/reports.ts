@@ -2,8 +2,6 @@ import { and, count, eq, isNull } from "drizzle-orm";
 import { InlineKeyboard, Keyboard, type Bot, type Context } from "grammy";
 import { getDb } from "./db";
 import { bans, cache, reports, users } from "./schema";
-import { COINS } from "./config";
-import { addCoins } from "./coins";
 import { hasAdminPermission, isAdminUser, ownerId, recordAdminAction } from "./admins";
 import { mainMenu } from "./menu";
 
@@ -260,11 +258,8 @@ export function registerReports(bot: Bot) {
     await recordAdminAction(ctx.from.id, `report.${act}`, id, { targetUserId: r.targetId });
 
     if (status === "confirmed") {
-      await addCoins(r.reporterId, COINS.reportReward, "report_reward", `report:${id}`).catch((e) =>
-        console.error("report reward error:", e)
-      );
       await ctx.api
-        .sendMessage(r.reporterId, `✅ گزارش شما تایید شد و ${COINS.reportReward} سکه هدیه گرفتی 🌹`)
+        .sendMessage(r.reporterId, "✅ گزارش شما تایید شد 🌹")
         .catch(() => {});
       if (act === "ban") {
         await banUser(r.targetId, `report #${id}`, ctx.from.id);

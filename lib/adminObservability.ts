@@ -175,7 +175,6 @@ export async function buildAdminExport(kind: "users-csv" | "users-json" | "analy
       lastSeenAt: users.lastSeenAt,
       isBanned: users.isBanned,
       proUntil: users.proUntil,
-      coins: users.coins,
     })
     .from(users)
     .orderBy(users.telegramId)
@@ -187,12 +186,11 @@ export async function buildAdminExport(kind: "users-csv" | "users-json" | "analy
     lastSeenAt: row.lastSeenAt.toISOString(),
     banned: row.isBanned,
     proUntil: row.proUntil?.toISOString() ?? null,
-    coins: row.coins,
   }));
   const note = `ردیف‌های خروجی: ${rows.length} از ${total.value}؛ شناسه‌ها و نام‌ها حذف/ناشناس‌سازی شده‌اند.`;
 
   if (kind === "users-csv") {
-    const headers = ["user_ref", "created_at", "last_seen_at", "banned", "pro_until", "coins"];
+    const headers = ["user_ref", "created_at", "last_seen_at", "banned", "pro_until"];
     const content = [
       headers.join(","),
       ...safeRows.map((row) =>
@@ -202,7 +200,6 @@ export async function buildAdminExport(kind: "users-csv" | "users-json" | "analy
           row.lastSeenAt,
           row.banned,
           row.proUntil ?? "",
-          row.coins,
         ].map(safeCsv).join(",")
       ),
     ].join("\r\n");

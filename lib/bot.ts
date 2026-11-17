@@ -31,8 +31,6 @@ import { logOperationalError } from "./operationalErrors";
 import { mainMenu, BTN } from "./menu";
 import { handleVoice, voiceGuide } from "./voice";
 import { clearMode, setVoiceMode } from "./mode";
-import { getCoins } from "./coins";
-import { COINS_INFO } from "./texts";
 import {
   addAdmin,
   isAdminUser,
@@ -537,16 +535,6 @@ export function getBot() {
     await takePendingSticker(id).catch(() => {});
     await setVoiceMode(id);
     await voiceGuide(ctx);
-  });
-
-  // 💰 سکه
-  bot.hears(BTN.coins, async (ctx) => {
-    await resetState(ctx);
-    const coins = await getCoins(ctx.from!.id);
-    await ctx.reply(`💰 <b>سکه‌های تو: ${coins}</b>\n\n${COINS_INFO}`, {
-      ...HTML,
-      ...NO_PREVIEW,
-    });
   });
 
   registerReports(bot);

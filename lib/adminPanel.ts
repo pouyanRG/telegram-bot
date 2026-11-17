@@ -300,7 +300,6 @@ async function showUser(ctx: Context, id: number) {
       `زبان: ${escapeHtml(user.language ?? "—")}`,
       `عضویت: ${user.createdAt.toLocaleDateString("fa-IR", { timeZone: "Asia/Tehran" })}`,
       `آخرین فعالیت: ${user.lastSeenAt.toLocaleString("fa-IR", { timeZone: "Asia/Tehran" })}`,
-      `سکه: ${user.coins}`,
       `اشتراک Pro تا: ${user.proUntil?.toLocaleDateString("fa-IR", { timeZone: "Asia/Tehran" }) ?? "—"}`,
       `وضعیت: ${user.isBanned ? `مسدود (تا ${when})` : "فعال"}`,
     ].join("\n"),

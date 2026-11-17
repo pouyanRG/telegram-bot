@@ -2,7 +2,6 @@ const DEFS = {
   help: { emoji: "❓", text: "راهنما" },
   feedback: { emoji: "📮", text: "انتقادات و پیشنهادات" },
   prices: { emoji: "💰", text: "رمزارزها" },
-  coins: { emoji: "🪙", text: "سکه" },
   voice: { emoji: "🎙", text: "ویس به متن" },
   news: { emoji: "📰", text: "اخبار روز" },
   mediaStickers: { emoji: "🎨", text: "استیکر و گیف" },
@@ -19,7 +18,6 @@ export const BTN = {
   help: label("help"),
   feedback: label("feedback"),
   prices: label("prices"),
-  coins: label("coins"),
   voice: label("voice"),
   news: label("news"),
   mediaStickers: label("mediaStickers"),
@@ -30,10 +28,10 @@ export const BTN = {
 
 export function mainMenu(isAdmin = false) {
   const keyboard = [
-    [BTN.prices, BTN.coins],
-    [BTN.voice, BTN.news],
-    [BTN.mediaStickers, BTN.mediaVideoNote],
-    [BTN.help, BTN.feedback],
+    [BTN.prices, BTN.voice],
+    [BTN.news, BTN.mediaStickers],
+    [BTN.mediaVideoNote, BTN.help],
+    [BTN.feedback],
     [BTN.menu],
   ];
   if (isAdmin) keyboard.push([BTN.settings]);

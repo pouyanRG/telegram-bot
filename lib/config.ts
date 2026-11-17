@@ -100,7 +100,3 @@ export const VOICE = {
 export function pickVoiceTier(sec: number) {
   return VOICE.tiers.find((t) => sec <= t.maxSec) ?? null;
 }
-
-export const COINS = {
-  reportReward: 5,
-} as const;

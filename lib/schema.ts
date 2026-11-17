@@ -26,7 +26,6 @@ export const users = pgTable("users", {
   banUntil: ts("ban_until"),
   createdAt: ts("created_at").defaultNow().notNull(),
   lastSeenAt: ts("last_seen_at").defaultNow().notNull(),
-  coins: integer("coins").default(0).notNull(),
 });
 
 
@@ -162,26 +161,6 @@ export const processedUpdates = pgTable(
   },
   (t) => ({
     byCreated: index("processed_updates_created_idx").on(t.createdAt),
-  })
-);
-
-export const coinTransactions = pgTable(
-  "coin_transactions",
-  {
-    id: serial("id").primaryKey(),
-    userId: bigint("user_id", { mode: "number" })
-      .notNull()
-      .references(() => users.telegramId, { onDelete: "cascade" }),
-    amount: integer("amount").notNull(), // مثبت یا منفی
-    reason: text("reason").notNull(),
-    ref: text("ref"),
-    balanceAfter: integer("balance_after").notNull(),
-    createdAt: ts("created_at").defaultNow().notNull(),
-  },
-  (t) => ({
-    // جلوگیری از ثبت دوباره‌ی یک تراکنش (ref=null یکتا حساب نمی‌شود، که درست است)
-    uniqRef: uniqueIndex("coin_tx_user_reason_ref_uq").on(t.userId, t.reason, t.ref),
-    byUser: index("coin_tx_user_idx").on(t.userId, t.id),
   })
 );
 
