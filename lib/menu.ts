@@ -1,6 +1,5 @@
 const DEFS = {
   help: { emoji: "❓", text: "راهنما" },
-  coins: { emoji: "💰", text: "سکه" },
   feedback: { emoji: "📮", text: "انتقادات و پیشنهادات" },
   prices: { emoji: "💰", text: "رمزارزها" },
   voice: { emoji: "🎙", text: "ویس به متن" },
@@ -8,7 +7,6 @@ const DEFS = {
   mediaStickers: { emoji: "🎨", text: "استیکر و گیف" },
   mediaVideoNote: { emoji: "📽️", text: "ویدیو مسیج" },
   settings: { emoji: "⚙️", text: "تنظیمات" },
-  menu: { emoji: "📋", text: "منو" },
 } as const;
 
 type Key = keyof typeof DEFS;

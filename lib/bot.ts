@@ -28,7 +28,7 @@ import { getPrices, formatPrices, findCoin, formatCoin } from "./prices";
 import { dedupeUpdates, featureGuard, userGuard, throttle } from "./middleware";
 import { isFeatureEnabled } from "./adminControls";
 import { logOperationalError } from "./operationalErrors";
-import { mainMenu, BTN } from "./menu";
+import { mainMenu, BTN, idleKb } from "./menu";
 import { handleVoice, voiceGuide } from "./voice";
 import { clearMode, setVoiceMode } from "./mode";
 import { getCoins } from "./coins";
@@ -113,6 +113,8 @@ function normalizeFa(s: string) {
 }
 
 // ---------- کیبوردهای داخل پیام ----------
+
+const homeKb = new InlineKeyboard().text("🏠 منوی اصلی", "menu:home");
 
 type NewsListKind = "all" | "unread" | "favorites" | "history";
 
@@ -513,8 +515,8 @@ export function getBot() {
   bot.hears(BTN.help, async (ctx) => {
     await resetState(ctx);
     let text = HELP_USER;
-    if (await isAdminUser(ctx.from!.id)) text += "\n" + HELP_ADMIN;
-    if (isOwner(ctx.from!.id)) text += "\n" + HELP_OWNER;
+    if (await isAdminUser(ctx.from.id)) text += "\n" + HELP_ADMIN;
+    if (isOwner(ctx.from.id)) text += "\n" + HELP_OWNER;
     await ctx.reply(text, { ...HTML, reply_markup: await menuFor(ctx) });
   });
 
@@ -529,8 +531,8 @@ export function getBot() {
   });
 
   bot.hears(BTN.voice, async (ctx) => {
-    await takePendingSticker(ctx.from!.id).catch(() => {});
-    await setVoiceMode(ctx.from!.id);
+    await takePendingSticker(ctx.from.id).catch(() => {});
+    await setVoiceMode(ctx.from.id);
     await voiceGuide(ctx);
   });
 
@@ -544,9 +546,9 @@ export function getBot() {
     });
   });
 
-  registerMediaConvert(bot);
   registerReports(bot);
   registerAdminPanel(bot);
+  registerMediaConvert(bot);
 
   // ================= ناوبری منو (ویرایش همان پیام) =================
 
