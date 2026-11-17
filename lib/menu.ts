@@ -15,7 +15,6 @@ const label = (key: Key) => `${DEFS[key].emoji} ${DEFS[key].text}`;
 
 export const BTN = {
   help: label("help"),
-  coins: label("coins"),
   feedback: label("feedback"),
   prices: label("prices"),
   voice: label("voice"),
