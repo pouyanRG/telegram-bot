@@ -7,6 +7,7 @@ export type ConversionKind =
   | "video-animation"
   | "video-sticker"
   | "photo-sticker"
+  | "photo-animation"
   | "sticker-image"
   | "sticker-animation";
 
@@ -116,6 +117,22 @@ export async function convertMedia(
 ) {
   if (kind === "photo-sticker") {
     await createPhotoSticker(inputPath, outputPath);
+  } else if (kind === "photo-animation") {
+    await runFfmpeg([
+      "-loop", "1",
+      "-i", inputPath,
+      "-t", "3",
+      "-vf", "fps=15,scale=480:480:force_original_aspect_ratio=decrease,pad=480:480:(ow-iw)/2:(oh-ih)/2,setsar=1",
+      "-an",
+      "-c:v", "libx264",
+      "-preset", "veryfast",
+      "-crf", "24",
+      "-pix_fmt", "yuv420p",
+      "-movflags", "+faststart",
+      "-threads", "1",
+      "-f", "mp4",
+      outputPath,
+    ]);
   } else if (kind === "video-sticker") {
     await createVideoSticker(inputPath, outputPath);
   } else if (kind === "sticker-image") {

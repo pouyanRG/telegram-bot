@@ -6,7 +6,15 @@ import { cache } from "./schema";
 const modeKey = (userId: number) => `mode:${userId}`;
 
 export async function setVoiceMode(userId: number) {
-  const data = { mode: "voice" };
+  await setMode(userId, "voice");
+}
+
+export async function setMediaMode(userId: number, mode: "media_stickers" | "media_video_note") {
+  await setMode(userId, mode);
+}
+
+async function setMode(userId: number, mode: string) {
+  const data = { mode };
   await getDb()
     .insert(cache)
     .values({ key: modeKey(userId), data })
@@ -18,6 +26,10 @@ export async function clearMode(userId: number) {
 }
 
 export async function isVoiceMode(userId: number) {
+  return (await getMode(userId)) === "voice";
+}
+
+export async function getMode(userId: number) {
   const [row] = await getDb().select().from(cache).where(eq(cache.key, modeKey(userId)));
-  return (row?.data as { mode?: string } | undefined)?.mode === "voice";
+  return (row?.data as { mode?: string } | undefined)?.mode;
 }

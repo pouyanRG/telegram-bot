@@ -8,6 +8,7 @@ import { getDb } from "./db";
 import { logOperationalError } from "./operationalErrors";
 import { downloadTelegramFile } from "./telegramFile";
 import { UserError } from "./errors";
+import { clearMode, getMode, setMediaMode } from "./mode";
 import { cache } from "./schema";
 import {
   convertMedia,
@@ -37,7 +38,6 @@ type ConversionState = {
 
 const actions = {
   video: [
-    { kind: "video-note", label: "⭕ ویدیو مسیج", message: "ویدیو مسیج آماده شد." },
     { kind: "video-animation", label: "🎞 گیف/انیمیشن", message: "انیمیشن آماده شد." },
     { kind: "video-sticker", label: "🎟 استیکر ویدیویی", message: "استیکر ویدیویی آماده شد." },
     { kind: "video-sticker", label: "➕ افزودن به پک", message: "استیکر به پک اضافه شد.", pack: true },
@@ -45,12 +45,15 @@ const actions = {
   photo: [
     { kind: "photo-sticker", label: "🎟 استیکر ثابت", message: "استیکر ثابت آماده شد." },
     { kind: "photo-sticker", label: "➕ افزودن به پک", message: "استیکر به پک اضافه شد.", pack: true },
+    { kind: "photo-animation", label: "🎞 تبدیل به گیف", message: "گیف آماده شد." },
   ],
   animation: [
-    { kind: "video-note", label: "⭕ ویدیو مسیج", message: "ویدیو مسیج آماده شد." },
+    { kind: "video-sticker", label: "🎟 استیکر ویدیویی", message: "استیکر ویدیویی آماده شد." },
+    { kind: "video-sticker", label: "➕ افزودن به پک", message: "استیکر به پک اضافه شد.", pack: true },
   ],
   staticSticker: [
     { kind: "sticker-image", label: "🖼 تبدیل به تصویر", message: "تصویر آماده شد." },
+    { kind: "photo-animation", label: "🎞 تبدیل به گیف", message: "گیف آماده شد." },
   ],
   videoSticker: [
     { kind: "sticker-animation", label: "🎞 تبدیل به انیمیشن", message: "انیمیشن آماده شد." },
@@ -116,6 +119,42 @@ async function replyWithChoices(
   });
 }
 
+async function handleMediaInput(
+  ctx: Context,
+  expectedMode: "media_stickers" | "media_video_note",
+  file: { fileId: string; size?: number },
+  choices: ConversionAction[],
+  wrongModeMessage: string,
+  replyToMessageId: number
+) {
+  const user = ctx.from;
+  if (!user) return;
+  const mode = await getMode(user.id);
+  if (mode !== expectedMode) {
+    if (mode === "media_stickers" || mode === "media_video_note") {
+      await ctx.reply(wrongModeMessage);
+    }
+    return;
+  }
+  await clearMode(user.id);
+  await replyWithChoices(ctx, file, choices, replyToMessageId);
+}
+
+function mediaGuide(mode: "media_stickers" | "media_video_note") {
+  const keyboard = new InlineKeyboard()
+    .text("لغو", "media:cancel")
+    .text("🏠 منوی اصلی", "menu:home");
+  return mode === "media_stickers"
+    ? {
+        text: "🎨 <b>استیکر و گیف</b>\nیک ویدیو، GIF، عکس یا استیکر ثابت/ویدیویی بفرست. فقط همین رسانه پردازش می‌شود؛ برای رسانهٔ بعدی دوباره وارد این بخش شو.",
+        keyboard,
+      }
+    : {
+        text: "⭕ <b>ویدیو مسیج</b>\nیک ویدیو بفرست تا به ویدیو مسیج تبدیل شود. ویدیوهای بیشتر از ۶۰ ثانیه خودکار تا ۶۰ ثانیه بریده می‌شوند.",
+        keyboard,
+      };
+}
+
 function outputName(kind: ConversionKind) {
   return `converted${conversionExtension(kind)}`;
 }
@@ -124,7 +163,7 @@ async function deliver(ctx: Context, path: string, kind: ConversionKind) {
   const file = new InputFile(path, outputName(kind));
   if (kind === "video-note") {
     await ctx.replyWithVideoNote(file, { length: 640 });
-  } else if (kind === "video-animation" || kind === "sticker-animation") {
+  } else if (kind === "video-animation" || kind === "photo-animation" || kind === "sticker-animation") {
     await ctx.replyWithAnimation(file);
   } else if (kind === "video-sticker" || kind === "photo-sticker") {
     await ctx.replyWithSticker(file);
@@ -182,22 +221,67 @@ function userFacingError(error: unknown) {
 }
 
 export function registerMediaConvert(bot: Bot) {
+  bot.callbackQuery("menu:media:stickers", async (ctx) => {
+    await ctx.answerCallbackQuery();
+    await setMediaMode(ctx.from.id, "media_stickers");
+    const guide = mediaGuide("media_stickers");
+    await ctx.reply(guide.text, { parse_mode: "HTML", reply_markup: guide.keyboard });
+  });
+
+  bot.callbackQuery("menu:media:video_note", async (ctx) => {
+    await ctx.answerCallbackQuery();
+    await setMediaMode(ctx.from.id, "media_video_note");
+    const guide = mediaGuide("media_video_note");
+    await ctx.reply(guide.text, { parse_mode: "HTML", reply_markup: guide.keyboard });
+  });
+
+  bot.callbackQuery("media:cancel", async (ctx) => {
+    await ctx.answerCallbackQuery();
+    await clearMode(ctx.from.id);
+    await ctx.reply("✅ لغو شد. برای استفاده دوباره یکی از بخش‌های منو را انتخاب کن.", {
+      reply_markup: new InlineKeyboard().text("🏠 منوی اصلی", "menu:home"),
+    });
+  });
+
   bot.on("message:video", async (ctx) => {
     const video = ctx.message.video;
-    await replyWithChoices(ctx, { fileId: video.file_id, size: video.file_size }, actions.video, ctx.message.message_id);
+    const mode = await getMode(ctx.from.id);
+    if (mode === "media_video_note") {
+      await handleMediaInput(
+        ctx,
+        "media_video_note",
+        { fileId: video.file_id, size: video.file_size },
+        [{ kind: "video-note", label: "⭕ تبدیل به ویدیو مسیج", message: "ویدیو مسیج آماده شد." }],
+        "",
+        ctx.message.message_id
+      );
+    } else if (mode === "media_stickers") {
+      await handleMediaInput(
+        ctx,
+        "media_stickers",
+        { fileId: video.file_id, size: video.file_size },
+        actions.video,
+        "",
+        ctx.message.message_id
+      );
+    }
   });
 
   bot.on("message:video_note", async (ctx) => {
-    const video = ctx.message.video_note;
-    await replyWithChoices(ctx, { fileId: video.file_id, size: video.file_size }, actions.video, ctx.message.message_id);
+    const mode = await getMode(ctx.from.id);
+    if (mode === "media_stickers" || mode === "media_video_note") {
+      await ctx.reply("برای تبدیل، یک ویدیو معمولی بفرست؛ پیام ویدیویی ورودی پشتیبانی نمی‌شود.");
+    }
   });
 
   bot.on("message:animation", async (ctx) => {
     const animation = ctx.message.animation;
-    await replyWithChoices(
+    await handleMediaInput(
       ctx,
+      "media_stickers",
       { fileId: animation.file_id, size: animation.file_size },
       actions.animation,
+      "برای تبدیل GIF، از منوی «استیکر و گیف» وارد شو.",
       ctx.message.message_id
     );
   });
@@ -205,16 +289,25 @@ export function registerMediaConvert(bot: Bot) {
   bot.on("message:photo", async (ctx) => {
     const photo = ctx.message.photo.at(-1);
     if (!photo) return;
-    await replyWithChoices(
+    await handleMediaInput(
       ctx,
+      "media_stickers",
       { fileId: photo.file_id, size: photo.file_size },
       actions.photo,
+      "برای تبدیل عکس، از منوی «استیکر و گیف» وارد شو.",
       ctx.message.message_id
     );
   });
 
   bot.on("message:sticker", async (ctx) => {
     const sticker = ctx.message.sticker;
+    const mode = await getMode(ctx.from.id);
+    if (mode !== "media_stickers") {
+      if (mode === "media_video_note") {
+        await ctx.reply("برای این تبدیل، از منوی «استیکر و گیف» وارد شو.");
+      }
+      return;
+    }
     if (sticker.is_animated && !sticker.is_video) {
       await ctx.reply("استیکرهای TGS فعلاً پشتیبانی نمی‌شوند.", {
         reply_parameters: { message_id: ctx.message.message_id },
@@ -222,10 +315,12 @@ export function registerMediaConvert(bot: Bot) {
       return;
     }
     const choices = sticker.is_video ? actions.videoSticker : actions.staticSticker;
-    await replyWithChoices(
+    await handleMediaInput(
       ctx,
+      "media_stickers",
       { fileId: sticker.file_id, size: sticker.file_size },
       choices,
+      "",
       ctx.message.message_id
     );
   });

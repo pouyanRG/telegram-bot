@@ -6,6 +6,9 @@ export function mainMenu(isAdmin = false) {
     .row()
     .text("🎙 ویس به متن", "menu:voice")
     .row()
+    .text("🎨 استیکر و گیف", "menu:media:stickers")
+    .text("⭕ ویدیو مسیج", "menu:media:video_note")
+    .row()
     .text("📰 اخبار روز", "menu:news")
     .row()
     .text("ℹ️ راهنما", "menu:help");
