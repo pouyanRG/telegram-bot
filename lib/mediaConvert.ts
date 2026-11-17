@@ -248,9 +248,7 @@ export function registerMediaConvert(bot: Bot) {
   bot.callbackQuery("media:cancel", async (ctx) => {
     await ctx.answerCallbackQuery();
     await clearMode(ctx.from.id);
-    await ctx.reply("✅ لغو شد. برای استفاده دوباره یکی از بخش‌های منو را انتخاب کن.", {
-      reply_markup: new InlineKeyboard().text("🏠 منوی اصلی", "menu:home"),
-    });
+    await ctx.deleteMessage();
   });
 
   bot.on("message:video", async (ctx) => {
