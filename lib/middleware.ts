@@ -150,7 +150,7 @@ export async function userGuard(ctx: Context, next: NextFunction) {
 function updateFeature(ctx: Context): ManagedFeature | null {
   const data = ctx.callbackQuery?.data;
   if (data === "menu:voice" || data?.startsWith("voice:")) return "voice";
-  if (data === "menu:prices" || data === "prices:refresh" || data?.startsWith("coin:")) return "coin";
+  if (data === "menu:prices" || data?.startsWith("prices:") || data?.startsWith("coin:") || data?.startsWith("crypto:")) return "coin";
   if (data === "menu:news" || data?.startsWith("news:")) return "news";
   if (
     ctx.message &&

@@ -23,7 +23,20 @@ import { registerAdminPanel } from "./adminPanel";
 import { registerMediaConvert } from "./mediaConvert";
 import { SETTINGS, quotaExceededMessage } from "./config";
 import { consumeQuota, refundQuota } from "./quota";
-import { getPrices, formatPrices, findCoin, formatCoin } from "./prices";
+import { getCoinPrices, getPrices, formatPrices, formatTopMovers, findCoin, formatCoin } from "./prices";
+import {
+  clearPendingPriceAlert,
+  createPriceAlert,
+  deletePriceAlert,
+  getPendingPriceAlert,
+  getPriceAlerts,
+  getWatchlist,
+  removeWatchlistCoin,
+  setPendingPriceAlert,
+  toggleWatchlist,
+  type CryptoCoin,
+  type PriceAlert,
+} from "./crypto";
 import { dedupeUpdates, featureGuard, userGuard, throttle } from "./middleware";
 import { isFeatureEnabled } from "./adminControls";
 import { logOperationalError } from "./operationalErrors";
@@ -118,6 +131,12 @@ type NewsListKind = "all" | "unread" | "favorites" | "history";
 const pricesKb = new InlineKeyboard()
   .text("🔄 بروزرسانی", "prices:refresh")
   .row()
+  .text("⭐ واچ‌لیست", "prices:watchlist")
+  .text("🔔 هشدارها", "prices:alerts")
+  .row()
+  .text("🚀 رشدها", "prices:top:gainers")
+  .text("📉 افت‌ها", "prices:top:losers")
+  .row()
   .text("🏠 منوی اصلی", "menu:home");
 
 function newsHomeKb() {
@@ -206,12 +225,67 @@ function newsCardKeyboard(
   return kb;
 }
 
-function coinKb(id: string) {
+function coinKb(coin: CryptoCoin, isWatched: boolean) {
   return new InlineKeyboard()
-    .text("🔄 بروزرسانی", `coin:${id}`)
-    .url("🌐 CoinGecko", `https://www.coingecko.com/en/coins/${id}`)
+    .text("🔄 بروزرسانی", `coin:${coin.id}`)
+    .url("🌐 CoinGecko", `https://www.coingecko.com/en/coins/${coin.id}`)
+    .row()
+    .text(`${isWatched ? "⭐ حذف از واچ‌لیست" : "☆ افزودن به واچ‌لیست"}`, `crypto:watch:${coin.id}`)
+    .text("🔔 هشدار قیمت", `crypto:alert:${coin.id}`)
     .row()
     .text("📊 بازار", "menu:prices")
+    .text("🏠 منو", "menu:home");
+}
+
+const escapeHtml = (value: string) =>
+  value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
+function cryptoCoin(coin: { id: string; name: string; symbol: string }): CryptoCoin {
+  return { id: coin.id, name: coin.name, symbol: coin.symbol };
+}
+
+function cryptoCoinText(coin: CryptoCoin) {
+  return `${escapeHtml(coin.name)} (${escapeHtml(coin.symbol)})`;
+}
+
+function formatAlert(alert: PriceAlert) {
+  const direction = alert.direction === "above" ? "بالاتر از" : "پایین‌تر از";
+  return `${cryptoCoinText(alert.coin)} ${direction} $${alert.price.toLocaleString("en-US")}`;
+}
+
+function parsePriceInput(value: string) {
+  const normalized = value
+    .replace(/[۰-۹]/g, (digit) => String(digit.charCodeAt(0) - 0x06f0))
+    .replace(/[٠-٩]/g, (digit) => String(digit.charCodeAt(0) - 0x0660))
+    .replace(/[٬,\s]/g, "")
+    .replace(/٫/g, ".");
+  const price = Number(normalized);
+  return Number.isFinite(price) && price > 0 ? price : null;
+}
+
+function watchlistKeyboard(coins: CryptoCoin[]) {
+  const keyboard = new InlineKeyboard();
+  for (const coin of coins) {
+    keyboard.text(`${coin.symbol} · نمایش`, `coin:${coin.id}`)
+      .text("حذف", `crypto:watchlist:remove:${coin.id}`)
+      .row();
+  }
+  return keyboard.text("⬅️ بازار", "menu:prices").text("🏠 منو", "menu:home");
+}
+
+function alertsKeyboard(alerts: PriceAlert[]) {
+  const keyboard = new InlineKeyboard();
+  for (const alert of alerts) {
+    keyboard.text(`✖ ${alert.coin.symbol} $${alert.price.toLocaleString("en-US")}`, `crypto:alert:delete:${alert.id}`).row();
+  }
+  return keyboard.text("⬅️ بازار", "menu:prices").text("🏠 منو", "menu:home");
+}
+
+function topMoversKeyboard(direction: "gainers" | "losers") {
+  return new InlineKeyboard()
+    .text(direction === "gainers" ? "📉 نمایش افت‌ها" : "🚀 نمایش رشدها", `prices:top:${direction === "gainers" ? "losers" : "gainers"}`)
+    .row()
+    .text("⬅️ بازار", "menu:prices")
     .text("🏠 منو", "menu:home");
 }
 
@@ -242,6 +316,7 @@ async function resetState(ctx: Context) {
   await Promise.all([
     clearMode(uid),
     takePendingSticker(uid),
+    clearPendingPriceAlert(uid),
   ]).catch((e) => console.error("resetState error:", e));
 }
 
@@ -252,6 +327,44 @@ async function sendPrices(ctx: Context) {
     await ctx.reply(formatPrices(data, updatedAt), { ...HTML, reply_markup: pricesKb });
   } catch {
     await ctx.reply("⚠️ الان نمی‌توانم اطلاعات را بگیرم. کمی بعد دوباره امتحان کن.");
+  }
+}
+
+async function renderWatchlist(ctx: Context) {
+  const coins = await getWatchlist(ctx.from!.id);
+  if (!coins.length) {
+    await editOrReply(ctx, "⭐ واچ‌لیستت خالی است. از صفحهٔ هر رمزارز آن را اضافه کن.", watchlistKeyboard(coins));
+    return;
+  }
+  try {
+    const prices = await getCoinPrices(coins.map((coin) => coin.id));
+    const rows = coins.map((coin) => {
+      const price = prices[coin.id]?.usd;
+      const value = price === undefined ? "داده در دسترس نیست" : `$${price.toLocaleString("en-US", { maximumFractionDigits: 8 })}`;
+      return `▫️ <b>${cryptoCoinText(coin)}</b> · ${value}`;
+    });
+    await editOrReply(ctx, [`⭐ <b>واچ‌لیست من</b>`, "", ...rows].join("\n"), watchlistKeyboard(coins));
+  } catch (error) {
+    console.error("crypto watchlist error:", error);
+    await editOrReply(ctx, "⚠️ الان نمی‌توانم قیمت‌های واچ‌لیست را بگیرم.", watchlistKeyboard(coins));
+  }
+}
+
+async function renderPriceAlerts(ctx: Context) {
+  const alerts = await getPriceAlerts(ctx.from!.id);
+  const text = alerts.length
+    ? [`🔔 <b>هشدارهای فعال</b>`, "", ...alerts.map((alert) => `▫️ ${formatAlert(alert)}`)].join("\n")
+    : "🔔 هشدار فعالی نداری. برای ساخت هشدار، یک رمزارز را باز کن و «هشدار قیمت» را بزن.";
+  await editOrReply(ctx, text, alertsKeyboard(alerts));
+}
+
+async function renderTopMovers(ctx: Context, direction: "gainers" | "losers") {
+  try {
+    const { data } = await getPrices();
+    await editOrReply(ctx, formatTopMovers(data, direction), topMoversKeyboard(direction));
+  } catch (error) {
+    console.error("crypto top movers error:", error);
+    await editOrReply(ctx, "⚠️ الان نمی‌توانم برترین‌های بازار را بگیرم.", topMoversKeyboard(direction));
   }
 }
 
@@ -563,6 +676,84 @@ export function getBot() {
     await sendPrices(ctx);
   });
 
+  bot.callbackQuery("prices:watchlist", async (ctx) => {
+    await ctx.answerCallbackQuery();
+    await renderWatchlist(ctx);
+  });
+
+  bot.callbackQuery("prices:alerts", async (ctx) => {
+    await ctx.answerCallbackQuery();
+    await renderPriceAlerts(ctx);
+  });
+
+  bot.callbackQuery(/^prices:top:(gainers|losers)$/, async (ctx) => {
+    await ctx.answerCallbackQuery();
+    await renderTopMovers(ctx, ctx.match[1] as "gainers" | "losers");
+  });
+
+  bot.callbackQuery(/^crypto:watch:(.+)$/, async (ctx) => {
+    try {
+      const coin = await findCoin(ctx.match[1], { byId: true });
+      if (!coin) return void (await ctx.answerCallbackQuery({ text: "ارز پیدا نشد" }));
+      const isWatched = await toggleWatchlist(ctx.from.id, cryptoCoin(coin));
+      if (isWatched === null) return void (await ctx.answerCallbackQuery({ text: "واچ‌لیست حداکثر ۲۰ ارز دارد" }));
+      await ctx.editMessageText(formatCoin(coin), {
+        ...HTML,
+        ...NO_PREVIEW,
+        reply_markup: coinKb(cryptoCoin(coin), isWatched),
+      });
+      await ctx.answerCallbackQuery({ text: isWatched ? "به واچ‌لیست اضافه شد ⭐" : "از واچ‌لیست حذف شد" });
+    } catch (error) {
+      if (!isNotModified(error)) console.error("crypto watchlist toggle error:", error);
+      await ctx.answerCallbackQuery({ text: "⚠️ ذخیره‌سازی انجام نشد" });
+    }
+  });
+
+  bot.callbackQuery(/^crypto:watchlist:remove:(.+)$/, async (ctx) => {
+    await removeWatchlistCoin(ctx.from.id, ctx.match[1]);
+    await renderWatchlist(ctx);
+    await ctx.answerCallbackQuery({ text: "از واچ‌لیست حذف شد" });
+  });
+
+  bot.callbackQuery(/^crypto:alert:([^:]+)$/, async (ctx) => {
+    try {
+      const coin = await findCoin(ctx.match[1], { byId: true });
+      if (!coin) return void (await ctx.answerCallbackQuery({ text: "ارز پیدا نشد" }));
+      const keyboard = new InlineKeyboard()
+        .text("وقتی بالاتر رفت", `crypto:alertdir:above:${coin.id}`)
+        .row()
+        .text("وقتی پایین‌تر رفت", `crypto:alertdir:below:${coin.id}`)
+        .row()
+        .text("لغو", `coin:${coin.id}`);
+      await editOrReply(ctx, `🔔 <b>هشدار ${cryptoCoinText(cryptoCoin(coin))}</b>\n\nنوع هشدار را انتخاب کن:`, keyboard);
+      await ctx.answerCallbackQuery();
+    } catch (error) {
+      console.error("crypto alert setup error:", error);
+      await ctx.answerCallbackQuery({ text: "⚠️ الان نمی‌توانم هشدار بسازم" });
+    }
+  });
+
+  bot.callbackQuery(/^crypto:alertdir:(above|below):(.+)$/, async (ctx) => {
+    try {
+      const coin = await findCoin(ctx.match[2], { byId: true });
+      if (!coin) return void (await ctx.answerCallbackQuery({ text: "ارز پیدا نشد" }));
+      const direction = ctx.match[1] as "above" | "below";
+      await setPendingPriceAlert(ctx.from.id, { coin: cryptoCoin(coin), direction });
+      const relation = direction === "above" ? "بالاتر" : "پایین‌تر";
+      await ctx.reply(`قیمت هدف ${cryptoCoinText(cryptoCoin(coin))} را به دلار بفرست؛ هشدار وقتی فعال می‌شود که قیمت ${relation} آن برود.\nنمونه: <code>65000</code>`, HTML);
+      await ctx.answerCallbackQuery();
+    } catch (error) {
+      console.error("crypto alert direction error:", error);
+      await ctx.answerCallbackQuery({ text: "⚠️ ذخیره‌سازی انجام نشد" });
+    }
+  });
+
+  bot.callbackQuery(/^crypto:alert:delete:([a-z0-9]+)$/, async (ctx) => {
+    await deletePriceAlert(ctx.from.id, ctx.match[1]);
+    await renderPriceAlerts(ctx);
+    await ctx.answerCallbackQuery({ text: "هشدار حذف شد" });
+  });
+
   bot.callbackQuery("prices:refresh", async (ctx) => {
     try {
       const { data, updatedAt } = await getPrices();
@@ -843,10 +1034,11 @@ export function getBot() {
     try {
       const coin = await findCoin(ctx.match[1], { byId: true });
       if (!coin) return void (await ctx.answerCallbackQuery({ text: "ارز پیدا نشد" }));
+      const watchlist = await getWatchlist(ctx.from.id);
       await ctx.editMessageText(formatCoin(coin), {
         ...HTML,
         ...NO_PREVIEW,
-        reply_markup: coinKb(coin.id),
+        reply_markup: coinKb(cryptoCoin(coin), watchlist.some((item) => item.id === coin.id)),
       });
       await ctx.answerCallbackQuery({ text: "بروز شد ✅" });
     } catch (e) {
@@ -859,6 +1051,27 @@ export function getBot() {
 
   // متن آزاد: نام یا نماد ارز (باید بعد از همه‌ی hears/commandها بیاید)
   bot.on("message:text", async (ctx) => {
+    const userId = ctx.from.id;
+    const pendingAlert = await getPendingPriceAlert(userId);
+    if (pendingAlert) {
+      const price = parsePriceInput(ctx.message.text.trim());
+      if (price === null) {
+        return void (await ctx.reply("قیمت معتبر نیست. فقط یک عدد مثبت به دلار بفرست؛ نمونه: <code>65000</code>.", HTML));
+      }
+      const alert = await createPriceAlert(userId, { ...pendingAlert, price });
+      await clearPendingPriceAlert(userId);
+      if (!alert) {
+        return void (await ctx.reply("حداکثر ۱۰ هشدار فعال می‌توانی داشته باشی. برای ادامه یکی را از بخش هشدارها حذف کن.", {
+          ...HTML,
+          reply_markup: new InlineKeyboard().text("🔔 مدیریت هشدارها", "prices:alerts"),
+        }));
+      }
+      return void (await ctx.reply(`✅ هشدار ثبت شد: ${formatAlert(alert)}`, {
+        ...HTML,
+        reply_markup: new InlineKeyboard().text("🔔 مدیریت هشدارها", "prices:alerts"),
+      }));
+    }
+
     const raw = ctx.message.text.trim();
     // نام فارسی شناخته‌شده به شناسه‌ی CoinGecko تبدیل می‌شود
     const query = FA_COINS[normalizeFa(raw)] ?? raw;
@@ -901,7 +1114,7 @@ export function getBot() {
       await ctx.reply(formatCoin(coin), {
         ...HTML,
         ...NO_PREVIEW,
-        reply_markup: coinKb(coin.id),
+        reply_markup: coinKb(cryptoCoin(coin), (await getWatchlist(uid)).some((item) => item.id === coin.id)),
       });
     } catch (e) {
       console.error("coin lookup error:", e);

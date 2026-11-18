@@ -129,6 +129,22 @@ export function getPrices(): Promise<PricesResult> {
   }));
 }
 
+export async function getCoinPrices(ids: string[]) {
+  const uniqueIds = [...new Set(ids.filter((id) => /^[a-z0-9-]+$/.test(id)))];
+  const chunks = Array.from({ length: Math.ceil(uniqueIds.length / 50) }, (_, index) =>
+    uniqueIds.slice(index * 50, (index + 1) * 50)
+  );
+  const results = await Promise.all(
+    chunks.map((chunk) =>
+      getJson(
+        `https://api.coingecko.com/api/v3/simple/price?ids=${chunk.join(",")}&vs_currencies=usd`,
+        cgHeaders()
+      )
+    )
+  );
+  return Object.assign({}, ...results) as Record<string, { usd: number }>;
+}
+
 // ---------- ابزارهای قالب‌بندی ----------
 
 // طبق مستندات تلگرام: < > & باید escape شوند
@@ -254,6 +270,22 @@ export function formatPrices(s: Snapshot, updatedAt?: Date) {
   return out.join("\n");
 }
 
+export function formatTopMovers(s: Snapshot, direction: "gainers" | "losers") {
+  const rows = COINS.map((coin) => ({ symbol: coin.symbol, price: s.coins[coin.id] }))
+    .filter((row) => row.price?.usd_24h_change !== undefined)
+    .sort((a, b) =>
+      direction === "gainers"
+        ? b.price.usd_24h_change! - a.price.usd_24h_change!
+        : a.price.usd_24h_change! - b.price.usd_24h_change!
+    )
+    .slice(0, 5);
+  const title = direction === "gainers" ? "بیشترین رشد ۲۴ ساعت" : "بیشترین افت ۲۴ ساعت";
+  const lines = rows.map(({ symbol, price }) =>
+    `${RLM}${direction === "gainers" ? "🟢" : "🔴"} <b>${esc(symbol)}</b>  $${fmtPrice(price.usd)}  ${pctText(price.usd_24h_change)}`
+  );
+  return [`${RLM}🏆 <b>${title}</b>`, "", ...lines].join("\n");
+}
+
 // ---------- جستجوی تک‌ارز ----------
 
 export type CoinInfo = {
@@ -261,7 +293,10 @@ export type CoinInfo = {
   name: string;
   symbol: string;
   usd: number;
+  change1h?: number;
   change24h?: number;
+  change7d?: number;
+  change30d?: number;
   high24h?: number;
   low24h?: number;
   marketCap?: number;
@@ -271,7 +306,7 @@ export type CoinInfo = {
 
 async function marketsById(id: string): Promise<CoinInfo | null> {
   const arr = await getJson(
-    `https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&ids=${encodeURIComponent(id)}`,
+    `https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&ids=${encodeURIComponent(id)}&price_change_percentage=1h%2C24h%2C7d%2C30d`,
     cgHeaders()
   );
   const d = arr?.[0];
@@ -281,7 +316,10 @@ async function marketsById(id: string): Promise<CoinInfo | null> {
     name: d.name,
     symbol: String(d.symbol).toUpperCase(),
     usd: d.current_price,
+    change1h: d.price_change_percentage_1h_in_currency ?? undefined,
     change24h: d.price_change_percentage_24h ?? undefined,
+    change7d: d.price_change_percentage_7d_in_currency ?? undefined,
+    change30d: d.price_change_percentage_30d_in_currency ?? undefined,
     high24h: d.high_24h ?? undefined,
     low24h: d.low_24h ?? undefined,
     marketCap: d.market_cap ?? undefined,
@@ -349,7 +387,10 @@ export function formatCoin(c: CoinInfo) {
     "<pre>" +
       [
         `Price : $${fmtPrice(c.usd)}`,
+        c.change1h === undefined ? "" : `1h    : ${pctText(c.change1h)}`,
         ch === undefined ? "" : `24h   : ${pctText(ch)} ${dot}`,
+        c.change7d === undefined ? "" : `7d    : ${pctText(c.change7d)}`,
+        c.change30d === undefined ? "" : `30d   : ${pctText(c.change30d)}`,
         c.high24h !== undefined ? `High  : $${fmtPrice(c.high24h)}` : "",
         c.low24h !== undefined ? `Low   : $${fmtPrice(c.low24h)}` : "",
       ]

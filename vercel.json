@@ -3,6 +3,10 @@
     {
       "path": "/api/cron/news",
       "schedule": "30 4 * * *"
+    },
+    {
+      "path": "/api/cron/crypto-alerts",
+      "schedule": "*/15 * * * *"
     }
   ]
 }
